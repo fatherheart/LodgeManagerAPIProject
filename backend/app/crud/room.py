@@ -55,61 +55,53 @@ class CRUDRoom(CRUDBase[Room, RoomCreate, RoomUpdate]):
         
         curr_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        ActiveInvite = aliased(Invite)
-        PendingTenantInvite = aliased(Invite)
+        active_invite = aliased(Invite)
+        pending_invite = aliased(Invite)
+
+        from sqlalchemy import literal
 
         stmt = (
             select(
-                Room,
-                case((ActiveInvite.id.is_not(None), True), else_=False).label('has_active_invite'),
+                self.model,
+                case(
+                    (active_invite.id.is_not(None), literal(True)),
+                    else_=literal(False)
+                ).label('has_active_invite'),
+
                 TenantProfile.id.label('tenant_id'),
                 User.first_name,
                 User.last_name,
                 User.phone_no
             )
-            .outerjoin(ActiveInvite, and_(
-                ActiveInvite.room_id == Room.id,
-                ActiveInvite.status == InviteStatus.SENT,
-                ActiveInvite.expires_at > curr_time
+            .outerjoin(active_invite, and_(
+                active_invite.room_id == self.model.id,
+                active_invite.status == InviteStatus.SENT,
+                active_invite.expires_at > curr_time
             ))
-            .outerjoin(PendingTenantInvite, and_(
-                PendingTenantInvite.room_id == Room.id,
-                PendingTenantInvite.status == InviteStatus.ACCEPTED
+            .outerjoin(pending_invite, and_(
+                pending_invite.room_id == self.model.id,
+                pending_invite.status == InviteStatus.ACCEPTED
             ))
             .outerjoin(TenantProfile, and_(
-                TenantProfile.id == PendingTenantInvite.accepted_by_tenant_id,
+                TenantProfile.id == pending_invite.accepted_by_tenant_id,
                 TenantProfile.status == TenantStatus.PENDING
             ))
             .outerjoin(User, User.id == TenantProfile.user_id)
-            .where(Room.id == room_id)
-            .options(joinedload(Room.lodge))
+            .where(self.model.id == room_id)
+            .options(joinedload(self.model.lodge))
         )
 
         return db.execute(stmt).first()
 
 
-    def get_rooms(self, db: Session, lodge_id:int, landlord_id: int, skip: int = 0, max_limit: int = 50):
+    def get_rooms(self, db: Session, lodge_id: int, skip: int = 0, max_limit: int = 50):
         """
-        Retrieve a list of rooms with pagination support
-
-        Args:
-            lodge_id(int): The iD of the lodge to filter by
-            db (Session): The database session.
-            landlord_id (int): The ID of the landlord to filter by.
-            skip (int, optional): Number of records to skip. Defaults to 0.
-            max_limit (int, optional): Maximum number of records to return. Defaults to 50.
-
-        Returns:
-            List[Room]: A list of retrieved rooms.
+        Retrieve a list of rooms for a lodge with pagination support.
         """
-        stmt = (select(self.model)
-                .join(Lodge)
-                .where(Lodge.landlord_id == landlord_id,
-                       Lodge.id == lodge_id)
-                .offset(skip).limit(limit=max_limit))
+        stmt = select(self.model).where(self.model.lodge_id == lodge_id).offset(skip).limit(limit=max_limit)
+        return list(db.execute(stmt).scalars().all())
 
-        rooms: list[Room] = list(db.execute(stmt).scalars().all())
-        return rooms
+
 
 
     def get_dashboard_rooms(
@@ -139,7 +131,7 @@ class CRUDRoom(CRUDBase[Room, RoomCreate, RoomUpdate]):
             Room.id.label('room_id'),
             Room.room_no.label('room_no'),
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeTexts.PENDING.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeTexts.PENDING_MOVEOUT.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeTexts.SAFE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeTexts.EXPIRING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeTexts.OVERDUE.value),
@@ -150,7 +142,7 @@ class CRUDRoom(CRUDBase[Room, RoomCreate, RoomUpdate]):
             ).label('badge_text'),
 
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeVariants.PURPLE.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeVariants.PURPLE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeVariants.SUCCESS.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeVariants.WARNING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeVariants.ORANGE.value),
@@ -215,12 +207,9 @@ class CRUDRoom(CRUDBase[Room, RoomCreate, RoomUpdate]):
             Room.room_no,
             Lease.agreed_rent_amt,
             Lease.end_date,
-            # Room.status,
 
         ))
 
-        #if filters dict is empty, fetch the list of categorized rooms with pagination support
-        #otherwise only fetch the list of room categories that match the provided filters
         filtered_stmt = apply_dashboard_filters(filter_by=filter_by, filters=const.filter_menu, stmt=stmt)
 
         stmt = filtered_stmt.offset(skip).limit(limit)

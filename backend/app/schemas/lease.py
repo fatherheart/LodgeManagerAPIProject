@@ -58,7 +58,7 @@ class OccupiedRoomLeasesResponse(BaseModel):
     safe: list[RoomGridSummary] = Field(..., description="List of rooms with safe leases.", examples=[[]])
     expiring: list[RoomGridSummary] = Field(..., description="List of rooms with expiring leases.", examples=[[]])
     overdue: list[RoomGridSummary] = Field(..., description="List of rooms with overdue payments.", examples=[[]])
-    pending: list[RoomGridSummary] = Field(..., description="List of rooms with pending leases.", examples=[[]])
+    pending_moveout: list[RoomGridSummary] = Field(..., description="List of rooms with pending leases.", examples=[[]])
     owing: list[RoomGridSummary] = Field(..., description="List of rooms with owing balances.", examples=[[]])
 
 class LeaseHistoryResponse(LeaseResponse):

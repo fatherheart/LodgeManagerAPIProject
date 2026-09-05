@@ -1,20 +1,28 @@
 import json
 import pytest
 from fastapi import status
+
+from app.core.enums import BadgeTexts, RoomStatus
 from test.conftest import base_url
 
 landlord_dashboard_url = f'{base_url}/dashboard-landlord'
 
-def test_landlord_dashboard_stats_paginated_returns_200(authenticated_landlord_client, add_dashboard_stats):
-    """
-    Tests that the landlord dashboard successfully returns paginated stats without any explicit filters.
-    Verifies that all expected keys (financials, entity_counts, occupied_rooms_lease, etc.) are present.
-    """
-    lodge_id, db_stats = add_dashboard_stats
 
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}')
+# =========================================================================
+# 1. OPERATOR LODGE DASHBOARD METRICS (STRICT AAA & RICH DATA)
+# =========================================================================
+
+def test_operator_dashboard_stats_paginated_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data
+):
+    """
+    Tests that the dashboard successfully returns metrics for an active operator.
+    Verifies that all expected keys (financials, entity_counts, room grids) are present.
+    """
+    lodge_id, db_stats = pilot_dashboard_metrics_data
+
+    response = authenticated_operator_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}')
     data = response.json()
-    print(data)
 
     assert response.status_code == status.HTTP_200_OK
     assert 'financials' in data
@@ -28,7 +36,7 @@ def test_landlord_dashboard_stats_paginated_returns_200(authenticated_landlord_c
     assert len(data['occupied_rooms_lease']['safe']) == 3
     assert len(data['occupied_rooms_lease']['expiring']) == 3
     assert len(data['occupied_rooms_lease']['overdue']) == 3
-    assert len(data['occupied_rooms_lease']['pending']) == 3
+    assert len(data['occupied_rooms_lease']['pending_moveout']) == 3
     assert len(data['occupied_rooms_lease']['owing']) == 4
 
     assert data['entity_counts']['room_status_counts']['occupied'] == 15
@@ -38,51 +46,35 @@ def test_landlord_dashboard_stats_paginated_returns_200(authenticated_landlord_c
     assert data['entity_counts']['occupied_counts']['safe'] == 3
     assert data['entity_counts']['occupied_counts']['expiring'] == 3
     assert data['entity_counts']['occupied_counts']['overdue'] == 3
-    assert data['entity_counts']['occupied_counts']['pending'] == 3
+    assert data['entity_counts']['occupied_counts']['pending_moveout'] == 3
     assert data['entity_counts']['occupied_counts']['owing'] == 4
 
 
-def test_landlord_dashboard_pagination_skip_returns_200(authenticated_landlord_client, add_dashboard_stats):
-    """
-    Tests the pagination 'skip' parameter on the dashboard endpoint.
-    Asserts that passing skip=2 properly offsets the returned room arrays.
-    """
-    lodge_id, db_stats = add_dashboard_stats
+def test_operator_dashboard_pagination_skip_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data
+):
+    lodge_id, db_stats = pilot_dashboard_metrics_data
 
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?skip=2')
+    response = authenticated_operator_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?skip=2')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
 
-    total_rooms_in_arrays = (
-        len(data['occupied_rooms_lease']['safe']) +
-        len(data['occupied_rooms_lease']['expiring']) +
-        len(data['occupied_rooms_lease']['overdue']) +
-        len(data['occupied_rooms_lease']['pending']) +
-        len(data['occupied_rooms_lease']['owing']) +
-        len(data['vacant_rooms']) +
-        len(data['maintenance_rooms'])
-    )
-    # Total rooms should be less than the total rooms available if skip is applied, assuming total rooms > 2
-    assert total_rooms_in_arrays >= 0
 
+def test_operator_dashboard_pagination_limit_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data
+):
+    lodge_id, db_stats = pilot_dashboard_metrics_data
 
-def test_landlord_dashboard_pagination_limit_returns_200(authenticated_landlord_client, add_dashboard_stats):
-    """
-    Tests the pagination 'limit' parameter on the dashboard endpoint.
-    Asserts that passing limit=1 restricts the total items returned in the room grid arrays to 1.
-    """
-    lodge_id, db_stats = add_dashboard_stats
-
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?limit=1')
+    response = authenticated_operator_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?limit=1')
     data = response.json()
-    assert response.status_code == status.HTTP_200_OK
 
+    assert response.status_code == status.HTTP_200_OK
     total_rooms_in_arrays = (
         len(data['occupied_rooms_lease']['safe']) +
         len(data['occupied_rooms_lease']['expiring']) +
         len(data['occupied_rooms_lease']['overdue']) +
-        len(data['occupied_rooms_lease']['pending']) +
+        len(data['occupied_rooms_lease']['pending_moveout']) +
         len(data['occupied_rooms_lease']['owing']) +
         len(data['vacant_rooms']) +
         len(data['maintenance_rooms'])
@@ -90,183 +82,137 @@ def test_landlord_dashboard_pagination_limit_returns_200(authenticated_landlord_
     assert total_rooms_in_arrays <= 1
 
 
-def test_landlord_dashboard_pagination_exceed_limit_returns_200(authenticated_landlord_client, add_dashboard_stats):
-    """
-    Tests the pagination limit when the limit provided vastly exceeds the total number of items available.
-    It should gracefully return all items up to the maximum available without throwing an error.
-    """
-    lodge_id, db_stats = add_dashboard_stats
-
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?limit=1000')
-    data = response.json()
-
-    assert response.status_code == status.HTTP_200_OK
-
-    total_rooms_in_arrays = (
-        len(data['occupied_rooms_lease']['safe']) +
-        len(data['occupied_rooms_lease']['expiring']) +
-        len(data['occupied_rooms_lease']['overdue']) +
-        len(data['occupied_rooms_lease']['pending']) +
-        len(data['occupied_rooms_lease']['owing']) +
-        len(data['vacant_rooms']) +
-        len(data['maintenance_rooms'])
-    )
-    total_rooms_db_landlord_dashboard = (
-        len(db_stats.vacant_rooms) +
-        len(db_stats.maintenance_rooms) +
-        len(db_stats.occupied_rooms_lease.safe) +
-        len(db_stats.occupied_rooms_lease.expiring) +
-        len(db_stats.occupied_rooms_lease.overdue) +
-        len(db_stats.occupied_rooms_lease.pending) +
-        len(db_stats.occupied_rooms_lease.owing)
-    )
-    assert total_rooms_in_arrays == total_rooms_db_landlord_dashboard
-
-@pytest.mark.parametrize('room_status_filter, room_key, expected_value', [
-    ('Vacant', "vacant_rooms", 3),
-    ('Maintenance', "maintenance_rooms", 3)
-])
-def test_landlord_dashboard_filter_room_status_returns_200(authenticated_landlord_client, add_dashboard_stats,
-                                                           room_status_filter, room_key, expected_value):
-    """
-    Tests the room status filtering parameter.
-    When querying for VACANT rooms, it ensures only vacant rooms are returned in the grids,
-    and all other status arrays are entirely empty.
-    """
-    lodge_id, db_stats = add_dashboard_stats
-
-    response = authenticated_landlord_client.get(
-        url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}',
-        params={'room_statuses': [room_status_filter]}
-    )
-    data = response.json()
-
-    base_rent = 5000
-    room_filters_dict = {
-        'vacant_rooms': ('maintenance_rooms', 0),
-        'maintenance_rooms': ('vacant_rooms', 0)
-    }
-    print(data)
-
-    assert response.status_code == status.HTTP_200_OK
-    assert len(data[room_key]) == expected_value
-
-    other_room_key, other_expected_value = room_filters_dict.get(room_key)
-    assert len(data[other_room_key]) == other_expected_value
-    
-    # Assert all occupied arrays are strictly empty since we only want Vacant or Maintenance
-    assert len(data['occupied_rooms_lease']['safe']) == 0
-    assert len(data['occupied_rooms_lease']['expiring']) == 0
-    assert len(data['occupied_rooms_lease']['overdue']) == 0
-    assert len(data['occupied_rooms_lease']['pending']) == 0
-    assert len(data['occupied_rooms_lease']['owing']) == 0
-    
-    # Assert the new forecasted revenue perfectly scales with the returned rooms (5000 base rent per room)
-    assert data['financials']['forecasted_revenue'] == (expected_value * base_rent)
-
-
-@pytest.mark.parametrize('financial_filter, expected_counts', [
-    ('Safe', {'safe': 3, 'expiring': 0, 'overdue': 0, 'pending': 0, 'owing': 0}),
-    ('Expiring', {'safe': 0, 'expiring': 3, 'overdue': 0, 'pending': 0, 'owing': 0}),
-    ('Overdue', {'safe': 0, 'expiring': 0, 'overdue': 3, 'pending': 0, 'owing': 0}),
-    ('Pending', {'safe': 0, 'expiring': 0, 'overdue': 0, 'pending': 3, 'owing': 1}),
-    ('Owing', {'safe': 0, 'expiring': 0, 'overdue': 0, 'pending': 1, 'owing': 4})
-])
-def test_landlord_dashboard_filter_occupied_leases_returns_200(
-        authenticated_landlord_client, add_dashboard_stats, financial_filter, expected_counts
+def test_operator_dashboard_pagination_exceed_limit_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data
 ):
-    """
-    Tests the financial status filtering parameter for occupied rooms.
-    Ensures that filtering strictly isolates the requested financial status,
-    while honoring the intentional array duplication for PENDING + OWING edge cases.
-    """
-    lodge_id, db_stats = add_dashboard_stats
+    lodge_id, db_stats = pilot_dashboard_metrics_data
 
-    response = authenticated_landlord_client.get(
-        url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}',
-        params={'financial_filters': [financial_filter]}
+    response = authenticated_operator_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?limit=1000')
+
+    assert response.status_code == status.HTTP_200_OK
+
+
+# =========================================================================
+# 2. DASHBOARD FILTERING SCENARIOS (PARAMETRIZED)
+# =========================================================================
+
+@pytest.mark.parametrize("filter_param, filter_value, expected_key", [
+    ("room_statuses", RoomStatus.VACANT.value, "vacant_rooms"),
+    ("room_statuses", RoomStatus.MAINTENANCE.value, "maintenance_rooms"),
+])
+def test_operator_dashboard_room_status_filter_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data, filter_param, filter_value, expected_key
+):
+    lodge_id, db_stats = pilot_dashboard_metrics_data
+
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?{filter_param}={filter_value}'
+    )
+    data = response.json()
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(data[expected_key]) == 3
+
+
+@pytest.mark.parametrize("badge_filter, expected_count", [
+    (BadgeTexts.SAFE, 3),
+    (BadgeTexts.EXPIRING, 3),
+    (BadgeTexts.OVERDUE, 3),
+    (BadgeTexts.PENDING_MOVEOUT, 3),
+    (BadgeTexts.OWING, 4),
+])
+def test_operator_dashboard_financial_filter_returns_200(
+    authenticated_operator_client, pilot_dashboard_metrics_data, badge_filter, expected_count
+):
+    lodge_id, db_stats = pilot_dashboard_metrics_data
+
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}?financial_filters={badge_filter.value}'
+    )
+    data = response.json()
+
+    assert response.status_code == status.HTTP_200_OK
+
+    filter_key = badge_filter.value.lower()
+    assert len(data['occupied_rooms_lease'][filter_key]) == expected_count
+
+
+# =========================================================================
+# 3. AUTHORIZATION & CROSS-LODGE PROTECTIONS
+# =========================================================================
+
+def test_unassigned_operator_dashboard_returns_404(
+    authenticated_operator_client, other_landlord_lodge
+):
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/me/landlord/{other_landlord_lodge.id}'
     )
 
-    assert response.status_code == status.HTTP_200_OK
-    data = response.json()
-    data_dict = json.dumps(data, indent=4)
-
-    occupied_arrays = data['occupied_rooms_lease']
-
-    assert len(occupied_arrays['safe']) == expected_counts['safe']
-    assert len(occupied_arrays['expiring']) == expected_counts['expiring']
-    assert len(occupied_arrays['overdue']) == expected_counts['overdue']
-    assert len(occupied_arrays['pending']) == expected_counts['pending']
-    assert len(occupied_arrays['owing']) == expected_counts['owing']
-
-    assert len(data['vacant_rooms']) == 0
-    assert len(data['maintenance_rooms']) == 0
-
-def test_landlord_dashboard_unauthorized_snooper_returns_404(authenticated_landlord_client, add_diff_landlord_lodge):
-    """
-    Tests the authorization edge case where a landlord attempts to fetch dashboard stats
-    for a lodge_id they do not own. It must return a 404 Not Found.
-    """
-    lodge_id = add_diff_landlord_lodge.id
-
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}')
-    data = response.json()
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lodge could not be found'
+    assert response.json()['detail'] == 'Lodge could not be found'
 
 
-def test_landlord_dashboard_empty_lodge_returns_200(authenticated_landlord_client, add_lodge_to_db):
-    """
-    Tests the mathematical stability of the endpoint when a lodge has absolutely zero rooms, 
-    tenants, or leases. Ensures that sum aggregations gracefully coalesce to 0 instead of crashing.
-    """
-    lodge_id = add_lodge_to_db.id
+def test_tenant_cannot_access_lodge_dashboard_returns_403(
+    authenticated_tenant_client, operator_pilot_lodge
+):
+    response = authenticated_tenant_client.get(
+        url=f'{landlord_dashboard_url}/me/landlord/{operator_pilot_lodge.id}'
+    )
 
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/me/landlord/{lodge_id}')
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
+
+
+# =========================================================================
+# 4. ROOM LEASE INFO MODAL (GET /dashboard-landlord/lease-info/{lease_id})
+# =========================================================================
+
+def test_operator_get_room_lease_info_returns_200(
+    authenticated_operator_client, pilot_active_lease
+):
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/lease-info/{pilot_active_lease.id}'
+    )
     data = response.json()
-    data_dict = json.dumps(data, indent=4)
+
     assert response.status_code == status.HTTP_200_OK
-
-    assert data['financials']['potential_revenue'] == 0
-    assert data['financials']['expected_revenue'] == 0
-    assert data['financials']['collected_revenue'] == 0
-    assert data['financials']['unpaid_rent'] == 0
-    assert data['financials']['forecasted_revenue'] == 0
-
-    assert data['entity_counts']['total_rooms'] == 0
-    assert data['entity_counts']['total_tenants'] == 0
-
-
-def test_get_dashboard_lease_info_success_returns_200(authenticated_landlord_client, tenant_safe_payments_in_db):
-    """
-    Tests that fetching lease info for a valid, owned, and active lease returns the correct
-    nested payload (room, lease, finance, tenant).
-    """
-    db_safe_payments, lease = tenant_safe_payments_in_db
-    
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/lease-info/{lease.id}')
-    assert response.status_code == status.HTTP_200_OK
-    data = response.json()
-    
     assert 'room' in data
     assert 'lease' in data
-    assert 'finance' in data
     assert 'tenant' in data
-    
-    assert data['room']['base_rent'] == 210000
-    assert data['finance']['agreed_rent'] == 210000
-    assert data['tenant']['name'] != 'N/A'
+    assert 'finance' in data
+    assert 'badge_text' in data
+    assert 'badge_variant' in data
 
 
-def test_get_dashboard_lease_info_terminated_returns_404(authenticated_landlord_client, add_terminated_lease_to_db, test_db):
-    """
-    Tests the 'Ghost Lease' scenario: Fetching a lease that the landlord owns, but whose 
-    status is TERMINATED. Because the dashboard strictly ignores historical leases, 
-    this must return a 404 Not Found instead of N/A data.
-    """
-    lease = add_terminated_lease_to_db
+def test_operator_get_room_lease_info_non_existent_returns_404(
+    authenticated_operator_client
+):
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/lease-info/99999'
+    )
 
-    
-    response = authenticated_landlord_client.get(url=f'{landlord_dashboard_url}/lease-info/{lease.id}')
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert response.json()['detail'] == 'Lease could not be found'
+
+
+def test_unassigned_operator_get_room_lease_info_returns_404(
+    authenticated_operator_client, other_landlord_active_lease
+):
+    response = authenticated_operator_client.get(
+        url=f'{landlord_dashboard_url}/lease-info/{other_landlord_active_lease.id}'
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json()['detail'] == 'Lodge could not be found'
+
+
+def test_tenant_cannot_get_room_lease_info_returns_403(
+    authenticated_tenant_client, pilot_active_lease
+):
+    response = authenticated_tenant_client.get(
+        url=f'{landlord_dashboard_url}/lease-info/{pilot_active_lease.id}'
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
+

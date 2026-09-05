@@ -29,8 +29,8 @@ filter_menu = {
     BadgeTexts.SAFE: (occupied_expr, is_not_pending, has_payed_in_full, days_left >= 90),
     BadgeTexts.EXPIRING: (occupied_expr, is_not_pending, has_payed_in_full, days_left.between(0, 89)),
     BadgeTexts.OVERDUE: (occupied_expr, is_not_pending, has_payed_in_full, days_left < 0),
-    BadgeTexts.PENDING: (occupied_expr, Lease.status == LeaseStatus.PENDING_TERMINATION),
+    BadgeTexts.PENDING_MOVEOUT: (occupied_expr, Lease.status == LeaseStatus.PENDING_TERMINATION),
     BadgeTexts.OWING: (occupied_expr, incomplete_payment)
 }
 
-UPDATABLE_ROOM_STATUSES = [RoomStatus.MAINTENANCE]
+UPDATABLE_ROOM_STATUSES = [RoomStatus.VACANT, RoomStatus.MAINTENANCE]

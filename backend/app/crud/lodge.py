@@ -61,7 +61,39 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
         return db.execute(stmt).scalar()
 
 
-    def get_lodges_by_owner(self, db: Session, landlord_id: int, skip: int = 0, limit: int = 100):
+    def get_by_name_and_creator(self, db: Session, creator_id: int, lodge_name: str):
+        """
+        Get an unclaimed lodge created by a specific operator by name.
+        """
+        search = f'%{lodge_name}%'
+        stmt = select(self.model).where(
+            self.model.created_by_user_id == creator_id,
+            or_(
+                self.model.name.ilike(search),
+                literal(search).ilike(self.model.name.concat('%'))
+            )
+        )
+        return db.execute(stmt).scalar()
+
+    def bind_ownership(self, db: Session, lodge: Lodge, landlord_id: int) -> Lodge:
+        """
+        Bind legal ownership of a lodge to a landlord.
+        """
+        lodge.landlord_id = landlord_id
+        db.commit()
+        db.refresh(lodge)
+        return lodge
+
+    def relinquish_ownership(self, db: Session, lodge: Lodge) -> Lodge:
+        """
+        Relinquish legal ownership of a lodge, returning it to unclaimed state.
+        """
+        lodge.landlord_id = None
+        db.commit()
+        db.refresh(lodge)
+        return lodge
+
+    def get_lodges_by_owner(self, db: Session, landlord_id: int, skip: int = 0, limit: int = 20):
         """
         Get multiple lodges owned by a specific landlord.
 
@@ -94,12 +126,17 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
 
         maintenance_count_expr = func.count(case((and_(*const.maintenance_expr), 1), else_=None))
 
+        total_rooms_count_expr = func.count(Room.id)
+
         stmt = select(
+
+            total_rooms_count_expr.label('total_rooms'),
             occupied_count_expr.label('occupied'),
             vacant_count_expr.label('vacant'),
             maintenance_count_expr.label('maintenance')
         ).select_from(
             Room
+
         ).outerjoin(
             Lease,
             and_(
@@ -174,9 +211,9 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             )
         )
 
-        pending_count_expr = func.count(
+        pending_moveout_count_expr = func.count(
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), 1), else_=None
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), 1), else_=None
             )
         )
 
@@ -184,7 +221,7 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             safe_count_expr.label('safe'),
             expiring_count_expr.label('expiring'),
             overdue_expr.label('overdue'),
-            pending_count_expr.label('pending'),
+            pending_moveout_count_expr.label('pending_moveout'),
             owing_count_expr.label('owing')
         ).select_from(Lease).outerjoin(
             Room, Lease.room_id == Room.id
@@ -205,7 +242,6 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
     def get_room_lease_info(
             self,
             db: Session,
-            landlord_id: int,
             lease_id: int
     ):
 
@@ -224,7 +260,7 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             const.days_left.label('days_left'),
 
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeTexts.PENDING.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeTexts.PENDING_MOVEOUT.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeTexts.SAFE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeTexts.EXPIRING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeTexts.OVERDUE.value),
@@ -233,7 +269,7 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             ).label('badge_text'),
 
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeVariants.PURPLE.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeVariants.PURPLE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeVariants.SUCCESS.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeVariants.WARNING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeVariants.ORANGE.value),
@@ -253,13 +289,13 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
         ).outerjoin(
             const.PAYMENT_SUBQ, const.PAYMENT_SUBQ.c.lease_id == Lease.id
         ).where(
-            self.model.landlord_id == landlord_id,
             Lease.id == lease_id,
             or_(
                 Lease.status.is_(None),
-                Lease.status == LeaseStatus.PENDING_TERMINATION
+                Lease.status != LeaseStatus.TERMINATED
             )
         ).group_by(
+
             Lease.id,
             Room.room_no,
             Room.description,
@@ -295,7 +331,7 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             const.remaining_balance_expr.label('remaining_balance'),
 
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeTexts.PENDING.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeTexts.PENDING_MOVEOUT.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeTexts.SAFE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeTexts.EXPIRING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeTexts.OVERDUE.value),
@@ -304,7 +340,7 @@ class CRUDLodge(CRUDBase[Lodge, LodgeCreate, LodgeUpdate]):
             ).label('badge_text'),
 
             case(
-                (and_(*const.filter_menu.get(BadgeTexts.PENDING)), BadgeVariants.PURPLE.value),
+                (and_(*const.filter_menu.get(BadgeTexts.PENDING_MOVEOUT)), BadgeVariants.PURPLE.value),
                 (and_(*const.filter_menu.get(BadgeTexts.SAFE)), BadgeVariants.SUCCESS.value),
                 (and_(*const.filter_menu.get(BadgeTexts.EXPIRING)), BadgeVariants.WARNING.value),
                 (and_(*const.filter_menu.get(BadgeTexts.OVERDUE)), BadgeVariants.ORANGE.value),

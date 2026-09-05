@@ -24,8 +24,8 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column('accepted_by_tenant_id', sa.Integer(), nullable=True))
         batch_op.create_foreign_key('fk_invites_room_id', 'rooms', ['room_id'], ['id'], ondelete='CASCADE')
         batch_op.create_foreign_key('fk_invites_accepted_by_tenant_id', 'tenant_profiles', ['accepted_by_tenant_id'], ['id'], ondelete='SET NULL')
-        batch_op.drop_constraint('fk_invites_lodge_id', type_='foreignkey')
         batch_op.drop_column('lodge_id')
+
 
 
 def downgrade() -> None:

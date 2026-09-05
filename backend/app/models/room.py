@@ -76,6 +76,22 @@ class Room(Base):
 
         return RoomStatus.OCCUPIED if has_active_lease else RoomStatus.VACANT
 
+    @property
+    def is_occupied(self) -> bool:
+        """Check if the room is currently occupied by an active tenant lease."""
+        return self.computed_status == RoomStatus.OCCUPIED
+
+    @property
+    def is_vacant(self) -> bool:
+        """Check if the room is vacant and ready for leasing."""
+        return self.computed_status == RoomStatus.VACANT
+
+    @property
+    def is_maintenance(self) -> bool:
+        """Check if the room is under maintenance."""
+        return self.computed_status == RoomStatus.MAINTENANCE
+
+
 
 @dataclass
 class RoomFilter:

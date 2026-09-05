@@ -9,13 +9,12 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import NotLandlordError, NotTenantError, UserNotFoundError, UnauthorizedAccessError, \
-    InvalidLeaseActionError, InvalidCredentialsError
-from app.core.security import create_access_token
+from app.core.exceptions import (NotLandlordError, NotTenantError, UserNotFoundError,
+                                 InvalidCredentialsError)
 from app.db.session import SessionLocal
-from typing import Generator, cast
+from typing import Generator
 from fastapi.security import OAuth2PasswordBearer
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from app.crud.user import crud_user
 from app.models.user import User
 from app.services.lodge_service import is_landlord, is_tenant
@@ -122,5 +121,24 @@ def get_tenant_user(
     if not is_tenant(current_user.role):
         raise NotTenantError()
     return current_user
+
+
+
+
+def get_operator_or_landlord_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Route Gate: Ensure the user has either an OPERATOR or LANDLORD role.
+    Stops tenants and invalid roles at the HTTP boundary.
+    """
+    from app.services.lodge_service import is_operator_or_landlord
+    from app.core.exceptions import NotOperatorOrLandlordError
+
+    if not is_operator_or_landlord(current_user.role):
+        raise NotOperatorOrLandlordError()
+    return current_user
+
+
 
 

@@ -1,15 +1,16 @@
 """
 API routes for managing leases.
 
-Provides endpoints for creating, retrieving, updating, and terminating leases for both landlords and tenants.
+Provides endpoints for creating, retrieving, updating, and terminating leases for landlords, operators, and tenants.
 """
-from app.core.enums import LeaseStatus
-from app.schemas import lease as schema_lease
-from app.schemas.error import ErrorResponseSchema
 from typing import List, Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app.api.deps import get_db, get_landlord_user, get_tenant_user
+
+from app.core.enums import LeaseStatus
+from app.schemas import lease as schema_lease
+from app.schemas.error import ErrorResponseSchema
+from app.api.deps import get_db, get_operator_or_landlord_user, get_tenant_user
 from app.models.user import User
 from app.services import lease_services
 
@@ -28,99 +29,69 @@ router = APIRouter()
     responses={
         400: {"model": ErrorResponseSchema, "description": "An active lease already exists for this room and tenant combination"},
         401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
-        403: {"model": ErrorResponseSchema, "description": "Only landlord accounts can perform this action"},
-        404: {"model": ErrorResponseSchema, "description": "Room does not exist or landlord does not own its lodge / Tenant does not exist or does not belong to this lodge"},
+        403: {"model": ErrorResponseSchema, "description": "Only authorized managers can perform this action"},
+        404: {"model": ErrorResponseSchema, "description": "Room does not exist or user does not have access / Tenant does not exist or does not belong to this lodge"},
     },
 )
 def create_new_lease(
-
-        lease_data: schema_lease.LeaseCreate,
-        db: Session = Depends(get_db),
-        landlord_user: User = Depends(get_landlord_user)
+    lease_data: schema_lease.LeaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_operator_or_landlord_user)
 ):
     """
     Create a new lease.
-
-    Args:
-        lease_data (schema_lease.LeaseCreate): The lease data to create.
-        db (Session): The database session.
-        landlord_user (User): The authenticated landlord user.
-
-    Returns:
-        schema_lease.LeaseResponse: The created lease.
     """
-
     return lease_services.create_new_lease_for_existing_tenant(
-        db,
+        db=db,
         lease_data=lease_data,
-        landlord_user=landlord_user
+        current_user=current_user
     )
-
 
 
 @router.get(
     '/{lodge_id}',
     response_model=List[schema_lease.LeaseHistoryResponse],
     summary="List leases for a lodge",
-    description=(
-        "Retrieves lease history for a lodge with optional filters by room, tenant, and status."
-    ),
+    description="Retrieves lease history for a lodge with optional filters by room, tenant, and status.",
     response_description="Filtered list of lease records",
     responses={
         401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
-        403: {"model": ErrorResponseSchema, "description": "Only landlord accounts can perform this action"},
-        404: {"model": ErrorResponseSchema, "description": "Lodge does not exist or does not belong to the authenticated landlord"},
+        403: {"model": ErrorResponseSchema, "description": "Only authorized managers can perform this action"},
+        404: {"model": ErrorResponseSchema, "description": "Lodge does not exist or user does not have access"},
     },
 )
-def get_leases_for_landlord(
-        lodge_id: int,
-        room_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        skip: Optional[int] = None,
-        limit: Optional[int] = None,
-        status: Optional[LeaseStatus] = None,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_landlord_user)
+def get_leases_for_operator(
+    lodge_id: int,
+    room_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
+    skip: Optional[int] = None,
+    limit: Optional[int] = None,
+    status: Optional[LeaseStatus] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_operator_or_landlord_user)
 ):
+
+
     """
-    Get all leases for a specific lodge owned by the landlord.
-
-    Args:
-        lodge_id (int): The ID of the lodge.
-        room_id (Optional[int]): Filter by room ID.
-        tenant_id (Optional[int]): Filter by tenant ID.
-        skip (Optional[int]): Number of records to skip.
-        limit (Optional[int]): Maximum number of records to return.
-        status (Optional[LeaseStatus]): Filter by lease status.
-        db (Session): The database session.
-        current_user (User): The authenticated landlord user.
-
-    Returns:
-        List[schema_lease.LeaseResponse]: A list of leases.
+    Get all leases for an authorized lodge.
     """
-
-
     return lease_services.get_filtered_landlord_leases(
-        db,
-        landlord_id=current_user.id,
+        db=db,
+        current_user=current_user,
         lodge_id=lodge_id,
         tenant_id=tenant_id,
         room_id=room_id,
         skip=skip,
         max_limit=limit,
         status=status
-
-        )
-
+    )
 
 
 @router.get(
     '/tenant/me',
     response_model=List[schema_lease.LeaseHistoryResponse],
     summary="List my leases as tenant",
-    description=(
-        "Retrieves all leases for the currently authenticated tenant with optional status filter."
-    ),
+    description="Retrieves all leases for the currently authenticated tenant with optional status filter.",
     response_description="List of tenant's lease records",
     responses={
         401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
@@ -129,122 +100,87 @@ def get_leases_for_landlord(
     },
 )
 def get_tenant_leases(
-        skip: Optional[int] = None,
-        max_limit: Optional[int] = None,
-        status: Optional[LeaseStatus] = None,
-        db: Session = Depends(get_db),
-        tenant_user: User = Depends(get_tenant_user)
+    skip: Optional[int] = None,
+    max_limit: Optional[int] = None,
+    status: Optional[LeaseStatus] = None,
+    db: Session = Depends(get_db),
+    tenant_user: User = Depends(get_tenant_user)
 ):
     """
     Get all leases for the currently authenticated tenant.
-
-    Args:
-        skip (Optional[int]): Number of records to skip.
-        max_limit (Optional[int]): Maximum number of records to return.
-        status (Optional[LeaseStatus]): Filter by lease status.
-        db (Session): The database session.
-        tenant_user (User): The authenticated tenant user.
-
-    Returns:
-        List[schema_lease.LeaseResponse]: A list of the tenant's leases.
     """
-    #leases must belong to the tenant
-    #leases can be filtered by active
-
     return lease_services.get_filtered_leases_tenant(
-            db,
-            tenant_profile=tenant_user.tenant_profile,
-            skip=skip,
-            max_limit=max_limit,
-            status=status
-
-        )
-
+        db=db,
+        tenant_profile=tenant_user.tenant_profile,
+        skip=skip,
+        max_limit=max_limit,
+        status=status
+    )
 
 
 @router.patch(
     '/{lease_id}',
     response_model=schema_lease.LeaseResponse,
     summary="Update lease details",
-    description=(
-        "Updates an existing lease's properties such as rent amount, dates, or assigned room/tenant."
-    ),
+    description="Updates an existing lease's properties such as rent amount or end date.",
     response_description="Updated lease details",
     responses={
         401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
-        403: {"model": ErrorResponseSchema, "description": "Only landlord accounts can perform this action"},
-        404: {"model": ErrorResponseSchema, "description": "Lease does not exist or does not belong to a room owned by the landlord"},
+        403: {"model": ErrorResponseSchema, "description": "Only authorized managers can perform this action"},
+        404: {"model": ErrorResponseSchema, "description": "Lease does not exist or user does not have access"},
     },
 )
 def update_lease_by_id(
-        lease_id: int,
-        lease_data: schema_lease.LeaseUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_landlord_user)
+    lease_id: int,
+    lease_data: schema_lease.LeaseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_operator_or_landlord_user)
 ):
     """
     Update details of an existing lease.
-
-    Args:
-        lease_id (int): The ID of the lease to update.
-        lease_data (schema_lease.LeaseUpdate): The updated lease data.
-        db (Session): The database session.
-        current_user (User): The authenticated landlord user.
-
-    Returns:
-        schema_lease.LeaseResponse: The updated lease.
     """
-    
-    return lease_services.update_lease_details(db, lease_id=lease_id, update_data=lease_data, landlord_id=current_user.id)
+    return lease_services.update_lease_details(
+        db=db,
+        lease_id=lease_id,
+        update_data=lease_data,
+        current_user=current_user
+    )
 
 
 @router.patch(
     '/terminate/{lease_id}',
     response_model=schema_lease.LeaseHistoryResponse,
     summary="Terminate a lease",
-    description=(
-        "Terminates an active lease and sets the room back to vacant. "
-        "The lease must not already be terminated."
-    ),
+    description="Terminates an active lease and sets the room back to vacant.",
     response_description="Terminated lease details",
     responses={
         400: {"model": ErrorResponseSchema, "description": "Lease is already terminated"},
         401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
-        403: {"model": ErrorResponseSchema, "description": "Only landlord accounts can perform this action"},
-        404: {"model": ErrorResponseSchema, "description": "Lease does not exist / The landlord does not own the lodge associated with this room"},
+        403: {"model": ErrorResponseSchema, "description": "Only authorized managers can perform this action"},
+        404: {"model": ErrorResponseSchema, "description": "Lease does not exist or user does not have access"},
     },
 )
 def terminate_lease_by_id(
-        lease_id: int,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_landlord_user)
+    lease_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_operator_or_landlord_user)
 ):
+
     """
-    Terminate a lease by its ID. Only landlords can perform this action.
-
-    Args:
-        lease_id (int): The ID of the lease to terminate.
-        db (Session): The database session.
-        current_user (User): The authenticated landlord user.
-
-    Returns:
-        schema_lease.LeaseResponse: The terminated lease.
+    Terminate a lease by its ID.
     """
-    #the landlord can only terminate leases in his specific lodge
-    #the lease must exist
-
-    return lease_services.terminate_lease(db, lease_id=lease_id, landlord_id=current_user.id
-                                                                              )
+    return lease_services.terminate_lease(
+        db=db,
+        lease_id=lease_id,
+        current_user=current_user
+    )
 
 
 @router.patch(
     '/me/terminate/{lease_id}',
     response_model=schema_lease.LeaseHistoryResponse,
     summary="Request lease termination as tenant",
-    description=(
-        "Allows a tenant to request termination of their active lease. "
-        "The lease must be active (not already terminated or pending termination)."
-    ),
+    description="Allows a tenant to request termination of their active lease.",
     response_description="Lease with updated pending termination status",
     responses={
         400: {"model": ErrorResponseSchema, "description": "Lease is already terminated or already pending termination"},
@@ -254,28 +190,15 @@ def terminate_lease_by_id(
     },
 )
 def request_lease_termination(
-        lease_id: int,
-        db: Session = Depends(get_db),
-        current_tenant: User = Depends(get_tenant_user)
+    lease_id: int,
+    db: Session = Depends(get_db),
+    current_tenant: User = Depends(get_tenant_user)
 ):
     """
     Request the termination of an active lease by a tenant.
-
-    Args:
-        lease_id (int): The ID of the lease to request termination for.
-        db (Session): The database session.
-        current_tenant (User): The authenticated tenant user.
-
-    Returns:
-        schema_lease.LeaseResponse: The lease with a pending termination request.
     """
-    #tenant can have multiple active leases
-    #tenant must be able to request termination of only his selected active lease
     return lease_services.appeal_for_lease_termination(
-        db,
+        db=db,
         lease_id=lease_id,
-        tenant_id = current_tenant.tenant_profile.id
+        tenant_id=current_tenant.tenant_profile.id
     )
-
-
-

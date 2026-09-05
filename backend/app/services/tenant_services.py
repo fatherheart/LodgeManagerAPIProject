@@ -1,9 +1,9 @@
 """
 Module providing tenant-related business logic.
 
-This module contains services for managing tenants and their profiles.
+This module contains services for managing tenants, applications, and profiles,
+supporting both Landlord and Operator operational management.
 """
-
 from sqlalchemy.orm import Session, joinedload
 
 from app.crud.invite import crud_invite
@@ -11,37 +11,27 @@ from app.crud.user import crud_user
 from app.crud.tenantprofile import crud_tenant
 from app.core.enums import UserRole, InviteStatus, TenantStatus
 from app.core.exceptions import (
-    UserAlreadyExistError, LodgeNotFoundError, TenantProfileNotFoundError,
+    UserAlreadyExistError, TenantProfileNotFoundError,
     InviteNotFoundError, InvalidInvitation, InvalidActionError,
-    RentAmtExceededError, InvalidLeaseActionError, RoomNotFoundError,
-    TenantHasActiveLeaseError
+    RentAmtExceededError, InvalidLeaseActionError, RoomNotFoundError
 )
 from app.core.security import get_password_hash
 from app.models.tenantprofile import TenantProfile
 from app.models.user import User
 from app.models.lease import Lease
-from app.models.payment import Payment
-from app.models.invitation import Invite
-from app.schemas.tenantprofile import TenantProfileCreate, TenantProfileUpdate, TenantStatusUpdate, TenantApprovalCreate
+from app.schemas.tenantprofile import TenantProfileCreate, TenantProfileUpdate, TenantApprovalCreate
 from app.schemas.user import UserInternal
-from app.services import lodge_service, room_service
+from app.services import lodge_service, room_service, user_service
 from app.services.payment_service import can_add_payment
 from app.crud.lease import crud_lease
 
 
 def sign_up_tenant(
-        db: Session,
-        tenant_in: TenantProfileCreate,
-):
+    db: Session,
+    tenant_in: TenantProfileCreate,
+) -> TenantProfile:
     """
-    Sign up a new tenant.
-
-    Args:
-        db (Session): The database session.
-        tenant_in (TenantProfileCreate): The tenant profile creation data.
-
-    Returns:
-        TenantProfile: The newly created tenant profile.
+    Sign up a new tenant via room invitation link.
     """
     invite_record = crud_invite.get_invite_record_by_id(db, invite_id=tenant_in.invite_id)
     
@@ -54,141 +44,89 @@ def sign_up_tenant(
     if invite_record.status != InviteStatus.SENT:
         raise InvalidInvitation(invite_status=invite_record.status)
 
-    if crud_user.get_user_by_email(db, email=tenant_in.user_info.email):
-        raise UserAlreadyExistError(email=tenant_in.user_info.email)
-
-    hashed = get_password_hash(tenant_in.user_info.password)
-
-    base_user_data = UserInternal(
-        first_name=tenant_in.user_info.first_name,
-        last_name=tenant_in.user_info.last_name,
-        phone_no=tenant_in.user_info.phone_no,
-        email=tenant_in.user_info.email,
-        hashed_password=hashed,
-        role=UserRole.TENANT
+    tenant_internal_signup_data = user_service.setup_signup_data_internal(
+        db, signup_data=tenant_in.user_info, role=UserRole.TENANT
     )
 
-    return crud_tenant.create_tenant(db, tenant_in=tenant_in, internal_user=base_user_data,
-                                     db_invite=invite_record)
+    return crud_tenant.create_tenant(
+        db=db,
+        tenant_in=tenant_in,
+        internal_user=tenant_internal_signup_data,
+        db_invite=invite_record
+    )
 
 
 def fetch_lodge_tenants(
-        db: Session,
-        lodge_id: int,
-        landlord_user: User,
-        skip: int ,
-        limit: int,
-        status: TenantStatus|None
+    db: Session,
+    lodge_id: int,
+    current_user: User,
+    skip: int = 0,
+    limit: int = 50,
+    status: TenantStatus | None = None
 ):
     """
-    Fetch all tenants for a specific lodge.
-
-    Args:
-        status: The status of the tenants to filter by. Defaults to None
-        db (Session): The database session.
-        lodge_id (int): The ID of the lodge.
-        landlord_user (User): The landlord user requesting the data.
-        skip (int): Number of records to skip.
-        limit (int): Maximum number of records to return.
-
-    Returns:
-        List[TenantProfile]: A list of tenant profiles.
+    Fetch all tenants for an authorized lodge.
     """
-    lodge_service.verify_lodge_ownership(db, lodge_id=lodge_id, landlord_id=landlord_user.id)
-    tenants = crud_tenant.get_tenants(db, lodge_id=lodge_id, skip=skip, max_limit=limit, status=status)
-    return tenants
+    lodge_service.verify_lodge_access(db=db, lodge_id=lodge_id, current_user=current_user)
+    return crud_tenant.get_tenants(db, lodge_id=lodge_id, skip=skip, max_limit=limit, status=status)
 
 
 def update_tenant_profile(
-        db: Session,
-        base_user: User,
-        update_data: TenantProfileUpdate
-):
+    db: Session,
+    base_user: User,
+    update_data: TenantProfileUpdate
+) -> TenantProfile:
     """
-    Update a tenant profile.
-
-    Args:
-        db (Session): The database session.
-        base_user (User): The user associated with the tenant.
-        update_data (TenantProfileUpdate): The updated tenant profile data.
-
-    Returns:
-        TenantProfile: The updated tenant profile.
+    Update a tenant's profile details.
     """
-
-    tenant_user = base_user.tenant_profile
-
-    return crud_tenant.update_tenant(db, update_data=update_data, tenant_user=tenant_user, base_user=base_user)
-
-
-def fetch_tenant(
-        current_user: User
-):
-    """
-    Fetch the tenant profile of the current user.
-
-    Args:
-        current_user (User): The current user.
-
-    Returns:
-        TenantProfile: The tenant profile.
-    """
-    tenant_profile = current_user.tenant_profile
-
+    tenant_profile = base_user.tenant_profile
     if not tenant_profile:
-        raise  TenantProfileNotFoundError()
+        raise TenantProfileNotFoundError()
 
-    return tenant_profile
+    return crud_tenant.update_tenant(
+        db=db,
+        update_data=update_data,
+        base_user=base_user,
+        tenant_user=tenant_profile
+    )
+
+
+def fetch_tenant(current_user: User) -> TenantProfile:
+    """
+    Fetch the authenticated tenant's own profile.
+    """
+    tenant = current_user.tenant_profile
+    if not tenant:
+        raise TenantProfileNotFoundError()
+    return tenant
 
 
 def fetch_tenant_by_landlord(
-        db: Session,
-        tenant_id: int,
-        current_user: User
-):
+    db: Session,
+    tenant_id: int,
+    current_user: User
+) -> TenantProfile:
     """
-    Fetch a tenant's profile by a landlord.
-
-    Args:
-        db (Session): The database session.
-        tenant_id (int): The ID of the tenant.
-        current_user (User): The landlord user.
-
-    Returns:
-        TenantProfile: The retrieved tenant profile.
+    Fetch a tenant's profile by an authorized lodge manager (Landlord or Operator).
     """
     options = joinedload(TenantProfile.lodge)
-
     tenant = crud_tenant.get(db, tenant_id, options)
 
-    if not tenant:
+    if not tenant or not tenant.lodge:
         raise TenantProfileNotFoundError()
 
-    lodge = tenant.lodge
-
-    if lodge.landlord_id != current_user.id:
-        raise TenantProfileNotFoundError()
-
+    lodge_service.verify_lodge_access(db=db, lodge_id=tenant.lodge_id, current_user=current_user)
     return tenant
 
 
 def approve_invited_tenant_application(
-        db: Session,
-        tenant_id: int,
-        landlord_user: User,
-        approval_data: TenantApprovalCreate
+    db: Session,
+    tenant_id: int,
+    current_user: User,
+    approval_data: TenantApprovalCreate
 ) -> Lease:
     """
     Approve a tenant's onboarding application and atomically create a Lease + initial Payment.
-
-    Args:
-        db (Session): The database session.
-        tenant_id (int): The ID of the tenant profile.
-        landlord_user (User): The authenticated landlord.
-        approval_data (TenantApprovalCreate): Explicit lease terms and upfront payment.
-
-    Returns:
-        Lease: The newly created lease.
     """
     options = [
         joinedload(TenantProfile.lodge),
@@ -196,11 +134,10 @@ def approve_invited_tenant_application(
     ]
     tenant = crud_tenant.get(db, tenant_id, *options)
 
-    if not tenant:
+    if not tenant or not tenant.lodge:
         raise TenantProfileNotFoundError()
 
-    if tenant.lodge.landlord_id != landlord_user.id:
-        raise TenantProfileNotFoundError()
+    lodge_service.verify_lodge_access(db=db, lodge_id=tenant.lodge_id, current_user=current_user)
 
     if tenant.status != TenantStatus.PENDING:
         raise InvalidActionError(error_name='Tenant Status', error_value=tenant.status.value)
@@ -209,7 +146,7 @@ def approve_invited_tenant_application(
     if not target_room_id:
         raise RoomNotFoundError(detail="No room associated with this tenant application")
 
-    room = room_service.verify_room_existence(db, landlord_id=landlord_user.id, room_id=target_room_id)
+    room = room_service.verify_room_existence(db=db, room_id=target_room_id, current_user=current_user)
 
     active_lease = crud_lease.get_active_lease_for_room(db, room_id=room.id)
     if active_lease:
@@ -236,38 +173,22 @@ def approve_invited_tenant_application(
 
 
 def reject_tenant_application(
-        db: Session,
-        tenant_id: int,
-        landlord_user: User
+    db: Session,
+    tenant_id: int,
+    current_user: User
 ) -> TenantProfile:
     """
-    Reject a tenant application or an approved tenant profile without active leases.
-
-    Args:
-        db (Session): The database session.
-        tenant_id (int): The ID of the tenant profile.
-        landlord_user (User): The authenticated landlord.
-
-    Returns:
-        TenantProfile: The updated tenant profile with REJECTED status.
+    Reject a pending tenant onboarding application.
     """
     options = joinedload(TenantProfile.lodge)
     tenant = crud_tenant.get(db, tenant_id, options)
 
-    if not tenant:
+    if not tenant or not tenant.lodge:
         raise TenantProfileNotFoundError()
 
-    if tenant.lodge.landlord_id != landlord_user.id:
-        raise TenantProfileNotFoundError()
+    lodge_service.verify_lodge_access(db=db, lodge_id=tenant.lodge_id, current_user=current_user)
 
-    # Rule 1: Cannot reject someone who is already REJECTED
-    if tenant.status == TenantStatus.REJECTED:
+    if tenant.status != TenantStatus.PENDING:
         raise InvalidActionError(error_name='Tenant Status', error_value=tenant.status.value)
 
-    # Rule 2: Cannot reject an approved tenant if they currently have any active lease
-    if crud_lease.has_active_lease(db, tenant_id=tenant.id):
-        raise TenantHasActiveLeaseError()
-
     return crud_tenant.reject_tenant(db, tenant=tenant)
-
-

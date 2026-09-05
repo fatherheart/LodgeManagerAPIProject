@@ -1,61 +1,130 @@
-
-
 import pytest
 from fastapi import status
-from datetime import timedelta
-
-from app.core.enums import LeaseStatus, InviteStatus, RoomStatus
+from app.core.enums import InviteStatus
 from test.conftest import base_url
 
 invite_url = f'{base_url}/invites'
 
 
-def test_landlord_create_invite_record_returns_201(authenticated_landlord_client, invite_schema_factory, add_lodge_to_db, add_room_to_db):
-    payload = invite_schema_factory(room_id=add_room_to_db.id, lodge_id=add_lodge_to_db.id).model_dump(mode='json')
+# =========================================================================
+# 1. INVITE CREATION TESTS (STRICT AAA & PARAMETRIZED)
+# =========================================================================
 
-    response = authenticated_landlord_client.post(f'{invite_url}', json=payload)
+def test_operator_create_invite_record_returns_201(
+    authenticated_operator_client, invite_schema_factory, operator_pilot_lodge, pilot_lodge_room
+):
+    """
+    Tests that an active operator can create an invite for a vacant room in their pilot lodge.
+    """
+    payload = invite_schema_factory(
+        room_id=pilot_lodge_room.id,
+        lodge_id=operator_pilot_lodge.id
+    ).model_dump(mode='json')
+
+    response = authenticated_operator_client.post(f'{invite_url}', json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_201_CREATED
-    assert data['lodge_id'] == add_lodge_to_db.id
-    assert data['room_id'] == add_room_to_db.id
-    assert data['room_no'] == add_room_to_db.room_no
+    assert data['lodge_id'] == operator_pilot_lodge.id
+    assert data['room_id'] == pilot_lodge_room.id
+    assert data['room_no'] == pilot_lodge_room.room_no
     assert data['status'] == InviteStatus.SENT
+    assert 'id' in data
 
 
-def test_landlord_get_invite_by_id_returns_200(authenticated_landlord_client, add_invite_to_db, add_lodge_to_db):
-    invite_id = add_invite_to_db.id
+def test_operator_get_invite_by_id_returns_200(
+    authenticated_operator_client, pilot_tenant_invite, operator_pilot_lodge
+):
+    """
+    Tests that an invitation details can be retrieved by its ID.
+    """
+    invite_id = pilot_tenant_invite.id
 
-    response = authenticated_landlord_client.get(f'{invite_url}/{invite_id}')
+    response = authenticated_operator_client.get(f'{invite_url}/{invite_id}')
     data = response.json()
+
     assert response.status_code == status.HTTP_200_OK
-    assert data['lodge_name'] == add_lodge_to_db.name
+    assert data['lodge_name'] == operator_pilot_lodge.name
     assert 'room_no' in data
 
 
-def test_cannot_create_duplicate_active_invite_for_same_room_returns_400(authenticated_landlord_client, add_invite_to_db, invite_schema_factory):
-    room_id = add_invite_to_db.room_id
-    payload = invite_schema_factory(room_id=room_id, lodge_id=add_invite_to_db.lodge_id).model_dump(mode='json')
+def test_create_duplicate_invite_returns_existing_active_invite_idempotently(
+    authenticated_operator_client, pilot_tenant_invite, invite_schema_factory
+):
+    """
+    Tests that requesting an invite for a room that already has an active pending invitation
+    idempotently returns the existing active invite.
+    """
+    room_id = pilot_tenant_invite.room_id
+    payload = invite_schema_factory(
+        room_id=room_id,
+        lodge_id=pilot_tenant_invite.lodge_id
+    ).model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(f'{invite_url}', json=payload)
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json()['detail'] == "Room already has an active pending invitation."
+    response = authenticated_operator_client.post(f'{invite_url}', json=payload)
+    data = response.json()
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert data['id'] == str(pilot_tenant_invite.id)
+    assert data['room_id'] == room_id
 
 
-def test_cannot_create_invite_for_diff_landlord_room_returns_404(authenticated_landlord_client, add_diff_landlord_room, invite_schema_factory):
-    payload = invite_schema_factory(room_id=add_diff_landlord_room.id).model_dump(mode='json')
+def test_unassigned_operator_cannot_create_invite_returns_404(
+    authenticated_operator_client, other_landlord_room, invite_schema_factory
+):
+    """
+    Tests that an operator cannot create an invite for a room in a lodge they are not assigned to.
+    """
+    payload = invite_schema_factory(
+        room_id=other_landlord_room.id,
+        lodge_id=other_landlord_room.lodge_id
+    ).model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(f'{invite_url}', json=payload)
+    response = authenticated_operator_client.post(f'{invite_url}', json=payload)
+
     assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json()['detail'] == "Room could not be found"
 
 
-def test_cannot_create_invite_for_maintenance_room_returns_400(authenticated_landlord_client, maintenance_rooms_in_db, invite_schema_factory):
-    m_room = maintenance_rooms_in_db[0]
-    payload = invite_schema_factory(room_id=m_room.id).model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(f'{invite_url}', json=payload)
+@pytest.mark.parametrize("room_fixture, expected_status_substr", [
+    ("pilot_maintenance_rooms_pool", "Maintenance"),
+    ("pilot_active_lease", "Occupied"),
+])
+def test_cannot_create_invite_for_non_vacant_room_returns_400(
+    authenticated_operator_client, request, invite_schema_factory, operator_pilot_lodge,
+    room_fixture, expected_status_substr
+):
+    """
+    Tests that invitations cannot be issued for rooms that are not VACANT (e.g. MAINTENANCE or OCCUPIED).
+    """
+    fixture_val = request.getfixturevalue(room_fixture)
+    room = fixture_val[0] if isinstance(fixture_val, list) else fixture_val.room
+
+    payload = invite_schema_factory(
+        room_id=room.id,
+        lodge_id=operator_pilot_lodge.id
+    ).model_dump(mode='json')
+
+    response = authenticated_operator_client.post(f'{invite_url}', json=payload)
+
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Maintenance" in response.json()['detail']
+    assert expected_status_substr.lower() in response.json()['detail'].lower()
 
 
 
+def test_tenant_cannot_create_invite_returns_403(
+    authenticated_tenant_client, invite_schema_factory, pilot_lodge_room, operator_pilot_lodge
+):
+    """
+    Tests that tenants are blocked at the route gate with 403 Forbidden.
+    """
+    payload = invite_schema_factory(
+        room_id=pilot_lodge_room.id,
+        lodge_id=operator_pilot_lodge.id
+    ).model_dump(mode='json')
+
+    response = authenticated_tenant_client.post(f'{invite_url}', json=payload)
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'

@@ -8,7 +8,7 @@ from app.api.v1.leases import router as lease_router
 from app.api.v1.payments import router as payment_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.handlers import lodge_ops_handlers
-from app.api.v1.dashboards.landlord_dashboard import router as landlord_dashboard_router
+from app.api.v1.dashboards.landlord_dashboard import router as operator_dashboard_router
 from app.api.v1.dashboards.tenant_dashboard import router as tenant_dashboard_router
 from app.api.v1.invites import router as invite_router
 
@@ -19,11 +19,11 @@ tags_metadata = [
     },
     {
         "name": "Lodges",
-        "description": "Manage lodges (properties). Landlords can create and configure their lodges.",
+        "description": "Manage lodges (properties). Operators and landlords can create and configure their lodges.",
     },
     {
         "name": "Rooms",
-        "description": "Manage rooms within lodges. Landlords can add rooms and update room status and pricing.",
+        "description": "Manage rooms within lodges. Operators can add rooms and update room status and pricing.",
     },
     {
         "name": "Tenants",
@@ -31,7 +31,7 @@ tags_metadata = [
     },
     {
         "name": "Leases",
-        "description": "Manage lease agreements between landlords and tenants.",
+        "description": "Manage lease agreements between operators and tenants.",
     },
     {
         "name": "Payments",
@@ -39,11 +39,11 @@ tags_metadata = [
     },
     {
         "name": "Dashboards",
-        "description": "Retrieve aggregated statistics and metrics for landlord and tenant dashboards.",
+        "description": "Retrieve aggregated statistics and metrics for operator and tenant dashboards.",
     },
     {
         "name": "Invites",
-        "description": "Manage invitations sent by landlords to prospective tenants.",
+        "description": "Manage invitations sent by operators to prospective tenants.",
     },
 ]
 
@@ -81,8 +81,9 @@ app.include_router(lease_router, prefix='/api/v1/leases', tags=['Leases'])
 app.include_router(payment_router, prefix='/api/v1/payments', tags=['Payments'])
 
 
-app.include_router(landlord_dashboard_router, prefix='/api/v1/dashboard-landlord', tags=['Dashboards'])
+app.include_router(operator_dashboard_router, prefix='/api/v1/dashboard-landlord', tags=['Dashboards'])
 app.include_router(tenant_dashboard_router, prefix='/api/v1/dashboard-tenant', tags=['Dashboards'])
+
 
 app.include_router(invite_router, prefix='/api/v1/invites', tags=['Invites'])
 

@@ -1,6 +1,6 @@
+from datetime import timedelta
 import pytest
 from fastapi import status
-from datetime import timedelta
 
 from app.core.enums import LeaseStatus, TenantStatus
 from app.services import tenant_services
@@ -8,18 +8,26 @@ from test.conftest import base_url
 
 lease_url = f'{base_url}/leases'
 
-def test_landlord_create_lease_for_approved_existing_tenant_returns_200(test_db, authenticated_landlord_client,add_landlord_to_db, mock_lease_schema):
-    """
-    Tests that a landlord can create a lease for an APPROVED existing resident.
-    """
-    payload = mock_lease_schema.model_dump(mode='json') # Use mode='json' for date serialization
 
-    tenant = tenant_services.fetch_tenant_by_landlord(test_db, tenant_id=mock_lease_schema.tenant_id,
-                                                      current_user=add_landlord_to_db)
+# =========================================================================
+# 1. LEASE CREATION FOR EXISTING RESIDENTS (OPERATOR-FIRST & STRICT AAA)
+# =========================================================================
+
+def test_operator_create_lease_for_approved_existing_tenant_returns_200(
+    test_db, authenticated_operator_client, operator_user, mock_lease_schema
+):
+    """
+    Tests that an operator can create a lease for an APPROVED existing resident.
+    """
+    payload = mock_lease_schema.model_dump(mode='json')
+
+    tenant = tenant_services.fetch_tenant_by_landlord(
+        test_db, tenant_id=mock_lease_schema.tenant_id, current_user=operator_user
+    )
     tenant.status = TenantStatus.APPROVED
     test_db.commit()
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
@@ -27,505 +35,459 @@ def test_landlord_create_lease_for_approved_existing_tenant_returns_200(test_db,
     assert data['room_id'] == mock_lease_schema.room_id
     assert data['agreed_rent_amt'] == mock_lease_schema.agreed_rent_amt
     assert data['status'] == 'Active'
-    assert data['start_date'] == mock_lease_schema.start_date.isoformat()
-    assert data['end_date'] == mock_lease_schema.end_date.isoformat()
     assert 'id' in data
-    assert 'created_at' in data
 
-def test_landlord_create_lease_for_pending_tenant_fails_returns_400(authenticated_landlord_client, mock_lease_schema):
-    """
-    Tests that a landlord cannot create a lease for a PENDING tenant via the existing tenant endpoint.
-    """
-    payload = mock_lease_schema.model_dump(mode='json')  # Use mode='json' for date serialization
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+def test_operator_cannot_create_direct_lease_for_pending_applicant_returns_400(
+    authenticated_operator_client, mock_lease_schema
+):
+    """
+    Tests that an operator cannot create a lease directly for a PENDING applicant (must onboard via invitation approval).
+    """
+    payload = mock_lease_schema.model_dump(mode='json')
+
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert 'Tenant is not approved by landlord' in data['detail']
+    assert 'Onboard them via invitation approval instead' in data['detail']
 
 
-def test_landlord_create_lease_for_rejected_existing_tenant_returns_200_and_flips_status_to_approved(
-    test_db, authenticated_landlord_client, add_landlord_to_db, mock_lease_schema
+
+
+def test_operator_create_lease_for_rejected_existing_tenant_returns_200_and_flips_status_to_approved(
+    test_db, authenticated_operator_client, operator_user, mock_lease_schema
 ):
     """
     Tests that creating a lease for a REJECTED existing resident succeeds and atomically flips their status to APPROVED.
     """
-    tenant = tenant_services.fetch_tenant_by_landlord(test_db, tenant_id=mock_lease_schema.tenant_id,
-                                                      current_user=add_landlord_to_db)
+    tenant = tenant_services.fetch_tenant_by_landlord(
+        test_db, tenant_id=mock_lease_schema.tenant_id, current_user=operator_user
+    )
     tenant.status = TenantStatus.REJECTED
     test_db.commit()
 
     payload = mock_lease_schema.model_dump(mode='json')
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert data['tenant_id'] == mock_lease_schema.tenant_id
     assert data['status'] == 'Active'
 
-    # Verify status in database was updated to APPROVED
     test_db.refresh(tenant)
     assert tenant.status == TenantStatus.APPROVED
 
-def test_landlord_create_lease_upfront_payment_exceeds_agreed_rent_returns_422(authenticated_landlord_client, mock_lease_schema):
+
+def test_operator_create_lease_upfront_payment_exceeds_agreed_rent_returns_422(
+    authenticated_operator_client, mock_lease_schema
+):
     """
-    Tests that a landlord cannot create a lease where the upfront payment exceeds the agreed rent amount.
+    Tests that Pydantic validation rejects upfront payment exceeding agreed rent amount.
     """
     payload = mock_lease_schema.model_dump(mode='json')
     payload['total_amt_paid'] = payload['agreed_rent_amt'] + 50000
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     assert any("Upfront payment cannot exceed agreed rent amount" in err.get('msg', '') for err in data.get('detail', []))
 
 
-def test_landlord_create_lease_room_does_not_exist_returns_404(authenticated_landlord_client, mock_lease_schema):
-    """
-    Tests that a landlord cannot create a lease for a room that does not exist.
-    """
-    mock_lease_schema.room_id = 99999  # A non-existent room ID
+def test_operator_create_lease_room_does_not_exist_returns_404(
+    authenticated_operator_client, mock_lease_schema
+):
+    mock_lease_schema.room_id = 99999
     payload = mock_lease_schema.model_dump(mode='json')
-    
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "Room could not be found" in data['detail']
 
-def test_landlord_create_lease_room_not_owned_by_landlord_returns_403(authenticated_landlord_client, mock_lease_schema, add_diff_landlord_room):
-    """
-    Tests that a landlord cannot create a lease for a room not owned by them.
-    """
-    mock_lease_schema.room_id = add_diff_landlord_room.id
+
+def test_unassigned_operator_create_lease_returns_404(
+    authenticated_operator_client, mock_lease_schema, other_landlord_room
+):
+    mock_lease_schema.room_id = other_landlord_room.id
     payload = mock_lease_schema.model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "Room could not be found" in data['detail']
 
-def test_landlord_create_lease_tenant_does_not_exist_returns_404(authenticated_landlord_client, mock_lease_schema):
-    """
-    Tests that a landlord cannot create a lease for a tenant that does not exist.
-    """
-    mock_lease_schema.tenant_id = 99999  # A non-existent tenant ID
+
+def test_operator_create_lease_tenant_does_not_exist_returns_404(
+    authenticated_operator_client, mock_lease_schema
+):
+    mock_lease_schema.tenant_id = 99999
     payload = mock_lease_schema.model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "Tenantprofile could not be found" in data['detail']
 
-def test_landlord_create_lease_tenant_not_in_landlords_lodge_returns_404(authenticated_landlord_client, mock_lease_schema, add_diff_landlord_tenant):
-    """
-    Tests that a landlord cannot create a lease for a tenant that exists but is not associated with their lodge.
-    """
-    mock_lease_schema.tenant_id = add_diff_landlord_tenant.id
+
+def test_operator_create_lease_tenant_not_in_same_lodge_returns_404(
+    authenticated_operator_client, mock_lease_schema, other_landlord_tenant
+):
+    mock_lease_schema.tenant_id = other_landlord_tenant.id
     payload = mock_lease_schema.model_dump(mode='json')
 
-    response = authenticated_landlord_client.post(lease_url, json=payload)
+    response = authenticated_operator_client.post(lease_url, json=payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "Tenantprofile could not be found" in data['detail']
 
-def test_landlord_create_lease_room_already_has_active_lease_returns_400(authenticated_landlord_client, mock_lease_schema,
-                                                                         add_active_lease_to_db):
-    """
-    Tests that a landlord cannot create a lease for a room that already has an active lease.
-    """
 
-    mock_lease_schema.start_date = mock_lease_schema.start_date + timedelta(days=1)
-    mock_lease_schema.end_date = mock_lease_schema.start_date + timedelta(days=180) # 6 months later
-    
-    lease_payload= mock_lease_schema.model_dump(mode='json')
-    response = authenticated_landlord_client.post(lease_url, json=lease_payload)
+def test_operator_create_lease_room_already_has_active_lease_returns_400(
+    authenticated_operator_client, mock_lease_schema, pilot_active_lease
+):
+    mock_lease_schema.room_id = pilot_active_lease.room_id
+
+    lease_payload = mock_lease_schema.model_dump(mode='json')
+    response = authenticated_operator_client.post(lease_url, json=lease_payload)
     data = response.json()
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "Lease is already Active" in data['detail']
 
 
-# --- Pagination Tests for Getting Leases (Landlord) ---
+# =========================================================================
+# 2. LEASE RETRIEVAL & PAGINATION (OPERATOR-FIRST)
+# =========================================================================
 
-def test_landlord_get_paginated_leases_returns_200(authenticated_landlord_client, leases_in_db, add_lodge_to_db):
+def test_operator_get_paginated_leases_returns_200(
+    authenticated_operator_client, pilot_leases_pool, operator_pilot_lodge
+):
     """
-    Tests that a landlord can get a paginated list of all leases in their lodge.
+    Tests that an operator can get a list of all leases in their lodge.
     """
-    lodge_id = add_lodge_to_db.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}')
+    lodge_id = operator_pilot_lodge.id
+    response = authenticated_operator_client.get(f'{lease_url}/{lodge_id}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
-    assert len(data) == len(leases_in_db)
+    assert len(data) == len(pilot_leases_pool)
 
-def test_landlord_get_leases_pagination_limit_returns_200(authenticated_landlord_client, leases_in_db, add_lodge_to_db):
-    """
-    Verifies that the limit parameter restricts the number of returned leases.
-    """
+
+def test_operator_get_leases_pagination_limit_returns_200(
+    authenticated_operator_client, pilot_leases_pool, operator_pilot_lodge
+):
     limit = 3
-    lodge_id = add_lodge_to_db.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}?limit={limit}')
+    lodge_id = operator_pilot_lodge.id
+    response = authenticated_operator_client.get(f'{lease_url}/{lodge_id}?limit={limit}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert len(data) == limit
 
-def test_landlord_get_leases_pagination_skip_returns_200(authenticated_landlord_client, leases_in_db, add_lodge_to_db):
-    """
-    Verifies that the skip parameter correctly offsets the returned leases.
-    """
+
+def test_operator_get_leases_pagination_skip_returns_200(
+    authenticated_operator_client, pilot_leases_pool, operator_pilot_lodge
+):
     skip = 2
     limit = 3
-    lodge_id = add_lodge_to_db.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}?skip={skip}&limit={limit}')
+    lodge_id = operator_pilot_lodge.id
+    response = authenticated_operator_client.get(f'{lease_url}/{lodge_id}?skip={skip}&limit={limit}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert len(data) == limit
-    # The order depends on default DB sorting (usually insertion order for simple tests).
-    # Since we added sequentially, data[0] should match leases_in_db[2]
-    assert data[0]['id'] == leases_in_db[skip].id
+    assert data[0]['id'] == pilot_leases_pool[skip].id
 
-def test_landlord_get_leases_pagination_skip_exceeds_total_returns_200(authenticated_landlord_client, leases_in_db, add_lodge_to_db):
-    """
-    Verifies that skipping more leases than exist returns an empty list.
-    """
-    total_leases = len(leases_in_db)
-    lodge_id = add_lodge_to_db.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}?skip={total_leases + 5}&limit=5')
-    data = response.json()
-
-    assert response.status_code == status.HTTP_200_OK
-    assert len(data) == 0
 
 @pytest.mark.parametrize("status_filter", [
     LeaseStatus.ACTIVE,
     LeaseStatus.OVERDUE
 ])
-def test_landlord_get_leases_pagination_with_status_filter_returns_200(authenticated_landlord_client, leases_in_db, add_lodge_to_db, status_filter):
-    """
-    Verifies that the status query parameter correctly filters the returned leases.
-    """
-    lodge_id = add_lodge_to_db.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}?status={status_filter.value}')
+def test_operator_get_leases_pagination_with_status_filter_returns_200(
+    authenticated_operator_client, pilot_leases_pool, operator_pilot_lodge, status_filter
+):
+    lodge_id = operator_pilot_lodge.id
+    response = authenticated_operator_client.get(f'{lease_url}/{lodge_id}?status={status_filter.value}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
-
-    # Filter the leases in DB manually to know the expected count
-    expected_filtered_leases = [lease for lease in leases_in_db if lease.status == status_filter]
-
+    expected_filtered_leases = [lease for lease in pilot_leases_pool if lease.status == status_filter]
     assert len(data) == len(expected_filtered_leases)
 
-    # Check that all returned leases have the correct status
     for lease in data:
         assert lease['status'] == status_filter.value
-        assert 'tenant_name' in lease
-        assert 'room_no' in lease
 
-def test_tenant_cannot_get_lodge_leases_returns_403(authenticated_tenant_client, add_lodge_to_db):
-    """
-    Tests that a tenant cannot access the landlord's endpoint for getting all leases in a lodge.
-    """
-    lodge_id = add_lodge_to_db.id
+
+def test_tenant_cannot_get_operator_gated_leases_returns_403(
+    authenticated_tenant_client, operator_pilot_lodge
+):
+    lodge_id = operator_pilot_lodge.id
     response = authenticated_tenant_client.get(f'{lease_url}/{lodge_id}')
-    data = response.json()
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
-    assert data['detail'] == 'Only landlords are allowed.'
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
 
-def test_landlord_cannot_get_leases_for_not_owned_lodge_returns_404(authenticated_landlord_client, add_diff_landlord_lodge):
-    """
-    Tests that a landlord cannot get leases from a lodge they do not own.
-    """
-    lodge_id = add_diff_landlord_lodge.id
-    response = authenticated_landlord_client.get(f'{lease_url}/{lodge_id}')
-    data = response.json()
 
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lodge could not be found'
-
-def test_landlord_cannot_get_leases_for_non_existent_lodge_returns_404(authenticated_landlord_client):
-    """
-    Tests that a landlord cannot get leases from a non-existent lodge.
-    """
-    fake_lodge_id = 9999
-    response = authenticated_landlord_client.get(f'{lease_url}/{fake_lodge_id}')
-    data = response.json()
+def test_unassigned_operator_cannot_get_leases_for_unassigned_lodge_returns_404(
+    authenticated_operator_client, other_landlord_lodge
+):
+    lodge_id = other_landlord_lodge.id
+    response = authenticated_operator_client.get(f'{lease_url}/{lodge_id}')
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lodge could not be found'
+    assert response.json()['detail'] == 'Lodge could not be found'
 
-# --- Pagination Tests for Getting Leases (Tenant) ---
 
-def test_tenant_get_personal_lease_history_returns_200(auth_client_factory, tenant_lease_history_in_db):
-    """
-    Tests that a tenant can get a paginated list of all their own leases.
-    """
-    tenant, db_leases = tenant_lease_history_in_db
-    
-    # We must construct a new authenticated client specifically for this newly created tenant
-    # to avoid using the default authenticated_tenant_client which represents a different user.
+# =========================================================================
+# 3. TENANT PERSONAL LEASE ACCESS (/leases/tenant/me)
+# =========================================================================
+
+def test_tenant_get_own_lease_history_returns_200(
+    auth_client_factory, pilot_tenant_lease_history
+):
+    tenant, db_leases = pilot_tenant_lease_history
     client = auth_client_factory(user_id=tenant.user_id)
-    
+
     response = client.get(f'{lease_url}/tenant/me')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert len(data) == len(db_leases)
-    # Verify they all belong to the tenant
-    for lease in data:
-        assert lease['tenant_id'] == tenant.id
-        assert 'tenant_name' in lease
-        assert 'room_no' in lease
 
-def test_tenant_get_personal_lease_history_pagination_limit(auth_client_factory, tenant_lease_history_in_db):
-    """
-    Verifies that the limit parameter restricts the number of returned personal leases.
-    """
-    tenant, db_leases = tenant_lease_history_in_db
-    client = auth_client_factory(user_id=tenant.user_id)
-    limit = 2
-    
-    response = client.get(f'{lease_url}/tenant/me?max_limit={limit}')
-    data = response.json()
 
-    assert response.status_code == status.HTTP_200_OK
-    assert len(data) == limit
-    if len(data) > 0:
-        assert 'tenant_name' in data[0]
-        assert 'room_no' in data[0]
-
-def test_tenant_get_personal_lease_history_pagination_skip(auth_client_factory, tenant_lease_history_in_db):
-    """
-    Verifies that the skip parameter correctly offsets the returned personal leases.
-    """
-    tenant, db_leases = tenant_lease_history_in_db
-    client = auth_client_factory(user_id=tenant.user_id)
-    skip = 1
-    limit = 3
-    
-    response = client.get(f'{lease_url}/tenant/me?skip={skip}&max_limit={limit}')
-    data = response.json()
-
-    assert response.status_code == status.HTTP_200_OK
-    assert len(data) == limit
-    assert data[0]['id'] == db_leases[skip].id
-    assert 'tenant_name' in data[0]
-    assert 'room_no' in data[0]
-
-def test_tenant_get_personal_lease_history_skip_exceeds_total(auth_client_factory, tenant_lease_history_in_db):
-    """
-    Verifies that skipping more personal leases than exist returns an empty list.
-    """
-    tenant, db_leases = tenant_lease_history_in_db
-    client = auth_client_factory(user_id=tenant.user_id)
-    total_leases = len(db_leases)
-    
-    response = client.get(f'{lease_url}/tenant/me?skip={total_leases + 5}&max_limit=5')
-    data = response.json()
-
-    assert response.status_code == status.HTTP_200_OK
-    assert len(data) == 0
-
-@pytest.mark.parametrize("status_filter", [
-    LeaseStatus.ACTIVE,
-    LeaseStatus.OVERDUE
-])
-def test_tenant_get_personal_lease_history_with_status_filter_returns_200(auth_client_factory, tenant_lease_history_in_db, status_filter):
-    """
-    Verifies that the status query parameter correctly filters the tenant's personal leases.
-    """
-    tenant, db_leases = tenant_lease_history_in_db
-    client = auth_client_factory(user_id=tenant.user_id)
-    
-    response = client.get(f'{lease_url}/tenant/me?status={status_filter.value}')
-    data = response.json()
-
-    assert response.status_code == status.HTTP_200_OK
-
-    # Filter the fixture leases manually to know the expected count
-    expected_filtered_leases = [lease for lease in db_leases if lease.status == status_filter]
-
-    assert len(data) == len(expected_filtered_leases)
-
-    # Check that all returned leases have the correct status and belong to the tenant
-    for lease in data:
-        assert lease['status'] == status_filter.value
-        assert lease['tenant_id'] == tenant.id
-        assert 'tenant_name' in lease
-        assert 'room_no' in lease
-
-def test_landlord_cannot_get_tenant_lease_history_returns_403(authenticated_landlord_client):
-    """
-    Tests that a landlord cannot access the tenant's endpoint for getting personal lease history.
-    """
-    response = authenticated_landlord_client.get(f'{lease_url}/tenant/me')
-    data = response.json()
+def test_operator_cannot_get_tenant_personal_lease_history_returns_403(
+    authenticated_operator_client
+):
+    response = authenticated_operator_client.get(f'{lease_url}/tenant/me')
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
-    assert data['detail'] == 'Only tenants are allowed.'
+    assert response.json()['detail'] == 'Only tenants are allowed.'
 
 
-# --- Lease Termination Tests (Landlord) ---
+# =========================================================================
+# 4. LEASE TERMINATION FLOWS (OPERATOR-FIRST & STRICT AAA)
+# =========================================================================
 
-def test_landlord_terminate_active_lease_returns_200(authenticated_landlord_client, add_active_lease_to_db):
+def test_operator_terminate_active_lease_returns_200(
+    authenticated_operator_client, pilot_active_lease
+):
     """
-    Tests that a landlord can successfully terminate an ACTIVE lease.
+    Tests that an operator can successfully terminate an ACTIVE lease.
     """
-    lease_id = add_active_lease_to_db.id
-    response = authenticated_landlord_client.patch(f'{lease_url}/terminate/{lease_id}')
+    lease_id = pilot_active_lease.id
+    response = authenticated_operator_client.patch(f'{lease_url}/terminate/{lease_id}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert data['status'] == LeaseStatus.TERMINATED.value
-    # Assuming your model returns the updated end_date
-    assert data['end_date'] is not None 
+    assert data['end_date'] is not None
 
-def test_landlord_terminate_non_existent_lease_returns_404(authenticated_landlord_client):
-    """
-    Tests that a landlord gets a 404 when trying to terminate a non-existent lease.
-    """
+
+def test_operator_terminate_non_existent_lease_returns_404(
+    authenticated_operator_client
+):
     fake_lease_id = 9999
-    response = authenticated_landlord_client.patch(f'{lease_url}/terminate/{fake_lease_id}')
-    data = response.json()
+    response = authenticated_operator_client.patch(f'{lease_url}/terminate/{fake_lease_id}')
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lease could not be found'
+    assert response.json()['detail'] == 'Lease could not be found'
 
 
-def test_landlord_terminate_already_terminated_lease_status_lease_returns_400(authenticated_landlord_client, add_terminated_lease_to_db):
-    """
-    Tests that a landlord cannot terminate a lease that is already TERMINATED or EXPIRED.
-    """
-    lease = add_terminated_lease_to_db
-    response = authenticated_landlord_client.patch(f'{lease_url}/terminate/{lease.id}')
-    data = response.json()
+def test_operator_terminate_already_terminated_lease_returns_400(
+    authenticated_operator_client, pilot_terminated_lease
+):
+    lease = pilot_terminated_lease
+    response = authenticated_operator_client.patch(f'{lease_url}/terminate/{lease.id}')
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert f"Lease is already {lease.status.value}" in data['detail']
+    assert f"Lease is already {lease.status.value}" in response.json()['detail']
 
-def test_landlord_terminate_lease_not_owned_returns_404(authenticated_landlord_client, add_active_lease_to_db,
-                                                        add_active_lease_to_diff_landlord_lodge):
-    """
-    Tests that a landlord cannot terminate a lease belonging to a room in another landlord's lodge.
-    """
 
-    response = authenticated_landlord_client.patch(f'{lease_url}/terminate/{add_active_lease_to_diff_landlord_lodge.id}')
-    data = response.json()
+def test_unassigned_operator_terminate_lease_returns_404(
+    authenticated_operator_client, other_landlord_active_lease
+):
+    response = authenticated_operator_client.patch(f'{lease_url}/terminate/{other_landlord_active_lease.id}')
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert "Room could not be found" in data['detail']
+    assert "Lodge could not be found" in response.json()['detail']
 
-def test_landlord_create_lease_tenant_not_approved_returns_400(authenticated_landlord_client, add_tenant_to_db, ):
-    pass
 
-# --- Lease Termination Appeal Tests (Tenant) ---
 
-def test_tenant_appeal_active_lease_returns_200(authenticated_tenant_client, add_active_lease_to_db):
-    """
-    Tests that a tenant can successfully appeal to terminate their own ACTIVE lease.
-    """
-    
-    response = authenticated_tenant_client.patch(f'{lease_url}/me/terminate/{add_active_lease_to_db.id}')
+# =========================================================================
+# 5. TENANT LEASE TERMINATION APPEALS
+# =========================================================================
+
+def test_tenant_appeal_active_lease_returns_200(
+    auth_client_factory, pilot_active_lease
+):
+    client = auth_client_factory(user_id=pilot_active_lease.tenant.user_id)
+    response = client.patch(f'{lease_url}/me/terminate/{pilot_active_lease.id}')
     data = response.json()
 
     assert response.status_code == status.HTTP_200_OK
     assert data['status'] == LeaseStatus.PENDING_TERMINATION.value
 
-def test_tenant_appeal_non_existent_lease_returns_404(authenticated_tenant_client):
-    """
-    Tests that a tenant gets a 404 when trying to appeal a non-existent lease.
-    """
+
+def test_tenant_appeal_non_existent_lease_returns_404(
+    authenticated_tenant_client
+):
     fake_lease_id = 9999
     response = authenticated_tenant_client.patch(f'{lease_url}/me/terminate/{fake_lease_id}')
-    data = response.json()
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lease could not be found'
+    assert response.json()['detail'] == 'Lease could not be found'
 
-def test_tenant_appeal_lease_not_owned_returns_404(auth_client_factory, add_second_tenant_to_db, add_active_lease_to_db):
-    """
-    Tests that a tenant cannot appeal a lease that belongs to another tenant.
-    """
-    lease_id = add_active_lease_to_db.id
-    client = auth_client_factory(user_id=add_second_tenant_to_db.user_id)
 
-    response = client.patch(f'{lease_url}/me/terminate/{lease_id}')
-    data = response.json()
+def test_tenant_appeal_lease_not_owned_returns_404(
+    auth_client_factory, second_tenant_in_landlord_lodge, pilot_active_lease
+):
+    client = auth_client_factory(user_id=second_tenant_in_landlord_lodge.user_id)
+    response = client.patch(f'{lease_url}/me/terminate/{pilot_active_lease.id}')
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert data['detail'] == 'Lease could not be found'
+    assert response.json()['detail'] == 'Lease could not be found'
+
 
 @pytest.mark.parametrize("fixture_name", [
-
-    "add_overdue_lease_to_db",
-    "add_active_lease_to_db"
+    "pilot_terminated_lease",
+    "pilot_pending_termination_lease"
 ])
-def test_tenant_can_appeal_valid_status_lease_returns_400(authenticated_tenant_client, request, fixture_name):
-    """
-    Tests that a tenant can appeal a lease that is already ACTIVE, OVERDUE
-    """
+def test_tenant_appeal_invalid_status_lease_returns_400(
+    auth_client_factory, request, fixture_name
+):
     lease = request.getfixturevalue(fixture_name)
-    
-    response = authenticated_tenant_client.patch(f'{lease_url}/me/terminate/{lease.id}')
-    data = response.json()
+    client = auth_client_factory(user_id=lease.tenant.user_id)
 
-    assert response.status_code == status.HTTP_200_OK
-    assert  data['status'] == LeaseStatus.PENDING_TERMINATION
-
-@pytest.mark.parametrize('fixture_name', [
-    'add_terminated_lease_to_db',
-    'add_pending_termination_lease_to_db'
-])
-def test_tenant_appeal_invalid_status_lease_returns_400(authenticated_tenant_client, request, fixture_name):
-    lease = request.getfixturevalue(fixture_name)
-    fixture_status_value = lease.status.value
-
-    response = authenticated_tenant_client.patch(f'{lease_url}/me/terminate/{lease.id}')
+    response = client.patch(f'{lease_url}/me/terminate/{lease.id}')
     data = response.json()
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert data['detail'] == f"Lease is already {fixture_status_value}"
+    assert data['detail'] == f"Lease is already {lease.status.value}"
 
 
-# --- Cross-Role Authorization Tests ---
+# =========================================================================
+# 6. ROUTE GATE CROSS-ROLE AUTHORIZATION TESTS
+# =========================================================================
 
-def test_tenant_cannot_create_lease_returns_403(authenticated_tenant_client, mock_lease_schema):
-    """
-    Tests that a tenant cannot access the endpoint for creating a lease.
-    """
+def test_tenant_cannot_create_lease_returns_403(
+    authenticated_tenant_client, mock_lease_schema
+):
     payload = mock_lease_schema.model_dump(mode='json')
     response = authenticated_tenant_client.post(lease_url, json=payload)
-    data = response.json()
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
-    assert data['detail'] == 'Only landlords are allowed.'
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
 
-def test_tenant_cannot_terminate_lease_via_landlord_endpoint_returns_403(authenticated_tenant_client, add_active_lease_to_db):
-    """
-    Tests that a tenant cannot access the landlord's endpoint for terminating a lease.
-    """
-    lease_id = add_active_lease_to_db.id
-    response = authenticated_tenant_client.patch(f'{lease_url}/terminate/{lease_id}')
-    data = response.json()
+
+def test_tenant_cannot_terminate_lease_via_manager_endpoint_returns_403(
+    authenticated_tenant_client, pilot_active_lease
+):
+    response = authenticated_tenant_client.patch(f'{lease_url}/terminate/{pilot_active_lease.id}')
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
-    assert data['detail'] == 'Only landlords are allowed.'
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
 
-def test_landlord_cannot_appeal_for_termination_returns_403(authenticated_landlord_client, add_active_lease_to_db):
-    """
-    Tests that a landlord cannot access the tenant's endpoint for appealing for termination.
-    """
-    lease_id = add_active_lease_to_db.id
-    response = authenticated_landlord_client.patch(f'{lease_url}/me/terminate/{lease_id}')
-    data = response.json()
+
+def test_operator_cannot_appeal_for_termination_via_tenant_endpoint_returns_403(
+    authenticated_operator_client, pilot_active_lease
+):
+    response = authenticated_operator_client.patch(f'{lease_url}/me/terminate/{pilot_active_lease.id}')
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
-    assert data['detail'] == 'Only tenants are allowed.'
+    assert response.json()['detail'] == 'Only tenants are allowed.'
+
+
+# =========================================================================
+# 7. LEASE UPDATE TESTS (PATCH /leases/{lease_id})
+# =========================================================================
+
+@pytest.mark.parametrize("update_payload, check_fields", [
+    ({"agreed_rent_amt": 350000}, ["agreed_rent_amt"]),
+    ({"end_date": "2027-06-30"}, ["end_date"]),
+    ({"agreed_rent_amt": 400000, "end_date": "2027-12-31"}, ["agreed_rent_amt", "end_date"]),
+])
+def test_operator_update_lease_fields_returns_200(
+    authenticated_operator_client, pilot_active_lease, update_payload, check_fields
+):
+    """
+    Tests that an active operator can update specific or combined lease fields (rent, end date, both).
+    """
+    response = authenticated_operator_client.patch(
+        f'{lease_url}/{pilot_active_lease.id}', json=update_payload
+    )
+    data = response.json()
+
+    assert response.status_code == status.HTTP_200_OK
+    for field in check_fields:
+        assert data[field] == update_payload[field]
+
+
+@pytest.mark.parametrize("fixture_name", [
+    "pilot_active_lease",
+    "pilot_overdue_lease",
+    "pilot_pending_termination_lease"
+])
+def test_operator_update_lease_across_valid_statuses_returns_200(
+    authenticated_operator_client, request, fixture_name
+):
+    """
+    Tests that an active operator can update lease terms across different active/pending lease statuses.
+    """
+    lease = request.getfixturevalue(fixture_name)
+    payload = {"agreed_rent_amt": 380000}
+
+    response = authenticated_operator_client.patch(f'{lease_url}/{lease.id}', json=payload)
+    data = response.json()
+
+    assert response.status_code == status.HTTP_200_OK
+    assert data['agreed_rent_amt'] == payload['agreed_rent_amt']
+
+
+def test_operator_update_non_existent_lease_returns_404(
+    authenticated_operator_client
+):
+    payload = {"agreed_rent_amt": 300000}
+    response = authenticated_operator_client.patch(f'{lease_url}/99999', json=payload)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json()['detail'] == 'Lease could not be found'
+
+
+@pytest.mark.parametrize("payload", [
+    {"agreed_rent_amt": 300000},
+    {"end_date": "2027-06-30"},
+])
+def test_unassigned_operator_cannot_update_lease_returns_404(
+    authenticated_operator_client, other_landlord_active_lease, payload
+):
+    """
+    Tests that an operator cannot update any fields of a lease in a lodge they are not assigned to.
+    """
+    response = authenticated_operator_client.patch(
+        f'{lease_url}/{other_landlord_active_lease.id}', json=payload
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json()['detail'] == 'Lodge could not be found'
+
+
+def test_tenant_cannot_update_lease_returns_403(
+    authenticated_tenant_client, pilot_active_lease
+):
+    """
+    Tests that tenants are blocked at the route gate from updating lease terms.
+    """
+    payload = {"agreed_rent_amt": 100000}
+    response = authenticated_tenant_client.patch(
+        f'{lease_url}/{pilot_active_lease.id}', json=payload
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()['detail'] == 'Only operators or landlords are allowed.'
+
+

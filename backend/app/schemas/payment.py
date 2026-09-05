@@ -17,7 +17,7 @@ class PaymentBase(BaseModel):
         amount_paid (int): The amount paid.
         lease_id (int): The ID of the lease this payment is for.
     """
-    amount_paid: int = Field(..., ge=0, description="The amount paid in KOBO.", examples=[5000000])
+    amount_paid: int = Field(..., gt=0, description="The amount paid in KOBO.", examples=[5000000])
     lease_id: int = Field(..., description="The ID of the lease this payment is for.", examples=[1])
 
 class PaymentCreate(PaymentBase):

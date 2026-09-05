@@ -1,98 +1,66 @@
 """
 Module providing lease-related business logic.
 
-This module contains services for managing leases.
+This module contains services for managing leases, supporting both Landlord and Operator operational management.
 """
-from typing import Optional
-from app.core.enums import LeaseStatus, RoomStatus, TenantStatus
+from typing import Optional, List
+from sqlalchemy.orm import Session, joinedload
+
+from app.core.enums import LeaseStatus, TenantStatus
 from app.crud.tenantprofile import crud_tenant
 from app.models.lease import Lease
 from app.models.room import Room
 from app.models.tenantprofile import TenantProfile
 from app.models.user import User
-from sqlalchemy.orm import Session, joinedload
 from app.schemas.lease import LeaseCreate, LeaseUpdate
 from app.services import lodge_service, room_service
 from app.crud.lease import crud_lease
-from app.core.exceptions import (RoomNotFoundError,
-                                 LeaseNotFoundError, InvalidLeaseActionError, TenantProfileNotFoundError,
-                                 RoomIsOccupiedError, RentAmtExceededError, UnapprovedTenantError)
+from app.core.exceptions import (
+    RoomNotFoundError, LeaseNotFoundError, InvalidLeaseActionError,
+    TenantProfileNotFoundError, RentAmtExceededError, PendingTenantNotAllowed, InvalidActionError
+)
 from app.services.payment_service import can_add_payment
 
 
 def create_new_lease_for_existing_tenant(
-        db: Session,
-        lease_data: LeaseCreate,
-        landlord_user: User
-):
+    db: Session,
+    lease_data: LeaseCreate,
+    current_user: User
+) -> Lease:
     """
     Create a new lease for an existing tenant (APPROVED or previously REJECTED).
-
-    Args:
-        db (Session): The database session.
-        lease_data (LeaseCreate): The lease creation data.
-        landlord_user (User): The landlord user creating the lease.
-
-    Returns:
-        Lease: The newly created lease.
     """
-    room = room_service.verify_room_existence(db, landlord_id=landlord_user.id, room_id=lease_data.room_id)
+    room = room_service.verify_room_existence(db=db, room_id=lease_data.room_id, current_user=current_user)
 
     tenant = crud_tenant.get(db, item_id=lease_data.tenant_id)
-
     if not tenant or room.lodge_id != tenant.lodge_id:
         raise TenantProfileNotFoundError()
 
-    active_lease = crud_lease.get_active_lease_for_room(
-        db,
-        room_id=room.id
-    )
-
+    active_lease = crud_lease.get_active_lease_for_room(db, room_id=room.id)
     if active_lease:
         raise InvalidLeaseActionError(lease_status=active_lease.computed_status)
 
-    default_total_payments = 0
-    if not can_add_payment(total_payments=default_total_payments, incoming_amt=lease_data.total_amt_paid,
-                           agreed_amt=lease_data.agreed_rent_amt):
-        raise RentAmtExceededError(
-            attempted=lease_data.total_amt_paid,
-            current_total=default_total_payments,
-            agreed=lease_data.agreed_rent_amt
-        )
-
     if tenant.status not in (TenantStatus.APPROVED, TenantStatus.REJECTED):
-        raise UnapprovedTenantError(tenant_id=tenant.id)
+        raise PendingTenantNotAllowed(tenant_id=tenant.id)
+
 
     return crud_lease.create_lease(db, lease_data=lease_data, tenant=tenant)
 
 
 def get_filtered_landlord_leases(
-        db: Session,
-        lodge_id: int,
-        landlord_id: int,
-        tenant_id: Optional[int] = None,
-        room_id: Optional[int] = None,
-        skip: Optional[int] = None,
-        max_limit: Optional[int] = None,
-        status: Optional[LeaseStatus] = None
-):
+    db: Session,
+    lodge_id: int,
+    current_user: User,
+    tenant_id: Optional[int] = None,
+    room_id: Optional[int] = None,
+    skip: Optional[int] = None,
+    max_limit: Optional[int] = None,
+    status: Optional[LeaseStatus] = None
+) -> List[Lease]:
     """
-    Get filtered leases for a landlord.
-
-    Args:
-        db (Session): The database session.
-        lodge_id (int): The ID of the lodge.
-        landlord_id (int): The ID of the landlord.
-        tenant_id (Optional[int]): Filter by tenant ID.
-        room_id (Optional[int]): Filter by room ID.
-        skip (Optional[int]): Number of records to skip.
-        max_limit (Optional[int]): Maximum number of records to return.
-        status (Optional[LeaseStatus]): Filter by lease status.
-
-    Returns:
-        list[Lease]: A list of filtered leases.
+    Get filtered leases for an authorized lodge.
     """
-    lodge_service.verify_lodge_ownership(db, lodge_id=lodge_id, landlord_id=landlord_id)
+    lodge_service.verify_lodge_access(db=db, lodge_id=lodge_id, current_user=current_user)
 
     return filter_leases(
         db,
@@ -106,66 +74,38 @@ def get_filtered_landlord_leases(
 
 
 def get_filtered_leases_tenant(
-        db: Session,
-        tenant_profile: TenantProfile,
-        skip: Optional[int] = None,
-        max_limit: Optional[int] = None,
-        status: Optional[LeaseStatus] = None
-):
+    db: Session,
+    tenant_profile: TenantProfile,
+    skip: Optional[int] = None,
+    max_limit: Optional[int] = None,
+    status: Optional[LeaseStatus] = None
+) -> List[Lease]:
     """
     Get filtered leases for a specific tenant.
-
-    Args:
-        db (Session): The database session.
-        tenant_profile (TenantProfile): The tenant's profile.
-        skip (Optional[int]): Number of records to skip.
-        max_limit (Optional[int]): Maximum number of records to return.
-        status (Optional[LeaseStatus]): Filter by lease status.
-
-    Returns:
-        list[Lease]: A list of filtered leases.
     """
-
     if not tenant_profile:
         raise TenantProfileNotFoundError()
 
     lodge = tenant_profile.lodge
-
     return filter_leases(
         db,
         tenant_id=tenant_profile.id,
         skip=skip,
         max_limit=max_limit,
         status=status,
-        lodge_id=lodge.id
+        lodge_id=lodge.id if lodge else None
     )
 
 
 def filter_leases(
-        db: Session,
-        lodge_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        room_id: Optional[int] = None,
-        skip: Optional[int] = None,
-        max_limit: Optional[int] = None,
-        status: Optional[LeaseStatus] = None
-):
-    """
-    Filter leases based on provided criteria.
-
-    Args:
-        db (Session): The database session.
-        lodge_id (Optional[int]): Filter by lodge ID.
-        tenant_id (Optional[int]): Filter by tenant ID.
-        room_id (Optional[int]): Filter by room ID.
-        skip (Optional[int]): Number of records to skip.
-        max_limit (Optional[int]): Maximum number of records to return.
-        status (Optional[LeaseStatus]): Filter by lease status.
-
-    Returns:
-        list[Lease]: A list of filtered leases.
-    """
-
+    db: Session,
+    lodge_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
+    room_id: Optional[int] = None,
+    skip: Optional[int] = None,
+    max_limit: Optional[int] = None,
+    status: Optional[LeaseStatus] = None
+) -> List[Lease]:
     return crud_lease.get_tenant_leases(
         db,
         lodge_id=lodge_id,
@@ -177,28 +117,16 @@ def filter_leases(
     )
 
 
-def verify_lease_to_terminate(
-        db: Session,
-        lease_id: int,
-
-):
-    """
-    Verify if a lease can be terminated.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease.
-
-    Returns:
-        Lease: The verified lease.
-    """
-    options = [joinedload(Lease.room).joinedload(Room.lodge), joinedload(Lease.tenant).joinedload(TenantProfile.user)]
+def verify_lease_to_terminate(db: Session, lease_id: int) -> Lease:
+    options = [
+        joinedload(Lease.room).joinedload(Room.lodge),
+        joinedload(Lease.tenant).joinedload(TenantProfile.user)
+    ]
     lease = crud_lease.get(db, lease_id, *options)
 
     if not lease:
         raise LeaseNotFoundError()
 
-    # don't terminate a lease if it has already been terminated
     if lease.status == LeaseStatus.TERMINATED:
         raise InvalidLeaseActionError(lease_status=lease.status)
 
@@ -206,79 +134,48 @@ def verify_lease_to_terminate(
 
 
 def terminate_lease(
-        db: Session,
-        lease_id: int,
-        landlord_id: int,
-):
+    db: Session,
+    lease_id: int,
+    current_user: User
+) -> Lease:
     """
-    Terminate a specific lease.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease to terminate.
-        landlord_id (int): The ID of the landlord.
-
-    Returns:
-        Lease: The terminated lease.
+    Terminate a specific lease by an authorized manager.
     """
-
     lease = verify_lease_to_terminate(db, lease_id=lease_id)
-
-    room = lease.room
-
-    if not lodge_service.landlord_owns_room_lodge(room=room, landlord_id=landlord_id):
-        raise RoomNotFoundError()
-
+    lodge_service.verify_lodge_access(db=db, lodge_id=lease.room.lodge_id, current_user=current_user)
     return crud_lease.lease_terminate(db, db_lease=lease)
 
 
 def update_lease_details(
-        db: Session,
-        lease_id: int,
-        update_data: LeaseUpdate,
-        landlord_id: int,
-):
+    db: Session,
+    lease_id: int,
+    update_data: LeaseUpdate,
+    current_user: User
+) -> Lease:
     """
     Update details of a specific lease.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease.
-        update_data (LeaseUpdate): The data to update.
-        landlord_id (int): The ID of the landlord.
-
-    Returns:
-        Lease: The updated lease.
     """
-    options = [joinedload(Lease.room).joinedload(Room.lodge), joinedload(Lease.tenant).joinedload(TenantProfile.user)]
-    lease = crud_lease.get(db, lease_id, options)
+    options = [
+        joinedload(Lease.room).joinedload(Room.lodge),
+        joinedload(Lease.tenant).joinedload(TenantProfile.user)
+    ]
+    lease = crud_lease.get(db, lease_id, *options)
 
-    if not lease:
+    if not lease or not lease.room or not lease.room.lodge:
         raise LeaseNotFoundError()
 
-    if not lodge_service.landlord_owns_room_lodge(room=lease.room, landlord_id=landlord_id):
-        raise LeaseNotFoundError()
-
+    lodge_service.verify_lodge_access(db=db, lodge_id=lease.room.lodge_id, current_user=current_user)
     return crud_lease.update(db, db_obj=lease, update_data=update_data)
 
 
 def appeal_for_lease_termination(
-        db: Session,
-        lease_id: int,
-        tenant_id: int
-):
+    db: Session,
+    lease_id: int,
+    tenant_id: int
+) -> Lease:
     """
     Appeal to terminate a lease by a tenant.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease.
-        tenant_id (int): The ID of the tenant.
-
-    Returns:
-        Lease: The lease with termination requested status.
     """
-
     lease = verify_lease_to_terminate(db, lease_id=lease_id)
 
     if not verify_tenant_owns_lease(lease=lease, tenant_id=tenant_id):
@@ -290,15 +187,5 @@ def appeal_for_lease_termination(
     return crud_lease.request_terminate_lease(db, db_lease=lease)
 
 
-def verify_tenant_owns_lease(lease: Lease, tenant_id: int):
-    """
-    Verify if a tenant owns a specific lease.
-
-    Args:
-        lease (Lease): The lease object.
-        tenant_id (int): The ID of the tenant.
-
-    Returns:
-        bool: True if the tenant owns the lease, False otherwise.
-    """
+def verify_tenant_owns_lease(lease: Lease, tenant_id: int) -> bool:
     return lease.tenant_id == tenant_id

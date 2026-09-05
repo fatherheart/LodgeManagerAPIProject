@@ -1,17 +1,21 @@
 """
 Module providing payment-related business logic.
 
-This module contains services for managing payments.
+This module contains services for managing payments, supporting both Landlord and Operator operational management.
 """
-from app.core.enums import LeaseStatus
-from app.core.exceptions import LeaseNotFoundError, RoomNotFoundError, InvalidLeaseActionError, RentAmtExceededError
-from app.crud.payment import crud_payment
-from app.crud.lease import crud_lease
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.enums import LeaseStatus
+from app.core.exceptions import (
+    LeaseNotFoundError, RoomNotFoundError,
+    InvalidLeaseActionError, RentAmtExceededError
+)
+from app.crud.payment import crud_payment
+from app.crud.lease import crud_lease
 from app.models.lease import Lease
 from app.models.room import Room
+from app.models.payment import Payment
 from app.models.user import User
 from app.schemas.payment import PaymentCreate
 from app.services import lodge_service
@@ -20,59 +24,36 @@ from app.services import lodge_service
 def can_add_payment(total_payments: int, incoming_amt: int, agreed_amt: int) -> bool:
     """
     Check if a payment can be added based on the total payments and agreed amount.
-
-    Args:
-        total_payments (int): The total amount paid so far.
-        incoming_amt (int): The incoming payment amount.
-        agreed_amt (int): The total agreed amount for the lease.
-
-    Returns:
-        bool: True if the payment can be added, False otherwise.
     """
     return total_payments + incoming_amt <= agreed_amt
 
 
 def add_payment_record(
-        db: Session,
-        current_landlord_id: int,
-        payment_data: PaymentCreate
-):
+    db: Session,
+    payment_data: PaymentCreate,
+    current_user: User
+) -> Payment:
     """
-    Add a new payment record.
-
-    Args:
-        db (Session): The database session.
-        current_landlord_id (int): The ID of the current landlord.
-        payment_data (PaymentCreate): The data for the new payment.
-
-    Returns:
-        Payment: The newly created payment record.
+    Add a new payment record by an authorized lodge manager.
     """
-    #use the lease id in the payment data to find the lease
-    #verify that the landlord owns the lodge the lease is in
-    #if lease exist create a payment record with that lease id...
-    #you can't add payment record to a lease whose agreed_rent_amt is equal to the aggregate of the payments made for that lease
-    #can't add payment for leases that are not active
-
     options = joinedload(Lease.room).joinedload(Room.lodge)
     lease = crud_lease.get(db, payment_data.lease_id, options)
 
-    if not lease:
+    if not lease or not lease.room or not lease.room.lodge:
         raise LeaseNotFoundError()
 
-    room = lease.room
-
-    if not lodge_service.landlord_owns_room_lodge(room=room, landlord_id=current_landlord_id):
-        raise RoomNotFoundError()
+    lodge_service.verify_lodge_access(db=db, lodge_id=lease.room.lodge_id, current_user=current_user)
 
     if lease.status == LeaseStatus.TERMINATED:
         raise InvalidLeaseActionError(lease_status=lease.status)
 
     total_payments = crud_payment.get_payments_aggregate_by_lease_id(db, lease_id=lease.id)
 
-    if not can_add_payment(total_payments=total_payments, incoming_amt=payment_data.amount_paid,
-                           agreed_amt=lease.agreed_rent_amt):
-
+    if not can_add_payment(
+        total_payments=total_payments,
+        incoming_amt=payment_data.amount_paid,
+        agreed_amt=lease.agreed_rent_amt
+    ):
         raise RentAmtExceededError(
             attempted=payment_data.amount_paid,
             current_total=total_payments,
@@ -83,68 +64,42 @@ def add_payment_record(
 
 
 def fetch_payments_by_lease(
-        db: Session,
-        lease_id: int,
-        landlord_id: int,
-        skip: Optional[int] = None,
-        limit: Optional[int] = None
-):
+    db: Session,
+    lease_id: int,
+    current_user: User,
+    skip: Optional[int] = None,
+    limit: Optional[int] = None
+) -> List[Payment]:
     """
     Fetch payments for a specific lease.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease.
-        landlord_id (int): The ID of the landlord.
-        skip (Optional[int]): Number of records to skip. Defaults to None.
-        limit (Optional[int]): Maximum number of records to return. Defaults to None.
-
-    Returns:
-        list[Payment]: A list of payments for the lease.
     """
     options = joinedload(Lease.room).joinedload(Room.lodge)
     lease = crud_lease.get(db, lease_id, options)
 
-    if not lease:
+    if not lease or not lease.room or not lease.room.lodge:
         raise LeaseNotFoundError()
 
-    room = lease.room
-
-    if not lodge_service.landlord_owns_room_lodge(room=room, landlord_id=landlord_id):
-        raise RoomNotFoundError()
-
+    lodge_service.verify_lodge_access(db=db, lodge_id=lease.room.lodge_id, current_user=current_user)
     return crud_payment.get_lease_payments(db, lease_id=lease_id, skip=skip, limit=limit)
 
 
 def fetch_tenant_lease_payments(
-        db: Session,
-        lease_id: int,
-        tenant_id: int,
-        skip: Optional[int],
-        limit: Optional[int]
-):
+    db: Session,
+    lease_id: int,
+    tenant_id: int,
+    skip: Optional[int] = None,
+    limit: Optional[int] = None
+) -> List[Payment]:
     """
     Fetch payments for a specific lease by a tenant.
-
-    Args:
-        db (Session): The database session.
-        lease_id (int): The ID of the lease.
-        tenant_id (int): The ID of the tenant.
-        skip (Optional[int]): Number of records to skip.
-        limit (Optional[int]): Maximum number of records to return.
-
-    Returns:
-        list[Payment]: A list of payments for the lease.
     """
     from app.services.lease_services import verify_tenant_owns_lease
 
     lease = crud_lease.get(db, item_id=lease_id)
-
     if not lease:
         raise LeaseNotFoundError()
 
     if not verify_tenant_owns_lease(lease=lease, tenant_id=tenant_id):
         raise LeaseNotFoundError()
-
 
     return crud_payment.get_lease_payments(db, lease_id=lease_id, skip=skip, limit=limit)

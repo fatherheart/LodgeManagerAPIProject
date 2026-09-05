@@ -29,8 +29,9 @@ class LodgeBase(BaseModel):
         return value.strip().lower()
 
 class RoomGenerator(BaseModel):
-    prefix: str = Field("", description="Prefix for the room numbers.", examples=["A", "Bldg1-"])
+    prefix: Optional[str] = Field(None, description="Optional prefix for room numbering e.g. 'A' or 'Rm'.", examples=["A"])
     start_number: int = Field(..., description="Starting number for the generated rooms.", examples=[1])
+
     end_number: int = Field(..., description="Ending number for the generated rooms.", examples=[20])
     default_rent: int = Field(..., description="Default rent amount in KOBO.", examples=[20000000])
     default_description: str = Field(..., description="Default description for the generated rooms.", examples=["Standard single room"])
@@ -44,11 +45,15 @@ class LodgeInternal(LodgeBase):
 
 class LodgeResponse(LodgeBase):
     id: int = Field(..., description="The unique identifier for the lodge.", examples=[1])
-    landlord_id: int = Field(..., description="The ID of the landlord owning this lodge.", examples=[1])
+    landlord_id: Optional[int] = Field(None, description="The ID of the landlord owning this lodge (None if unclaimed).", examples=[1])
+    created_by_user_id: Optional[int] = Field(None, description="The ID of the user who provisioned the lodge.", examples=[1])
+    is_claimed: bool = Field(..., description="Whether the lodge has been claimed by a landlord.", examples=[True])
     created_at: datetime = Field(..., description="Timestamp when the lodge was created.", examples=["2026-07-04T06:05:02Z"])
     is_active: bool = Field(..., description="Whether the lodge is active.", examples=[True])
 
+
     model_config = {'from_attributes': True}
+
 
 
 class LodgeUpdate(BaseModel):

@@ -1,10 +1,15 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { StatCard } from "../components/dashboard/stat-card";
-import { RoomCard } from "../components/dashboard/room-card";
+import { Button } from "../../components/ui/button";
+import { StatCard } from "../../components/dashboard/stat-card";
+import { RoomCard } from "../../components/dashboard/room-card";
 import { MOCK_ROOMS } from "./rooms";
 
-export default function DashboardPage() {
+export const Route = createFileRoute("/_app/dashboard")({
+  component: DashboardPage,
+});
+
+function DashboardPage() {
   const actionNeededRooms = MOCK_ROOMS.filter(
     (r) => r.status === "warning" || r.status === "overdue",
   );

@@ -1,9 +1,14 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { LandlordSignUpForm } from "../components/auth/landlord-signup-form";
-import { TenantSignUpForm } from "../components/auth/tenant-signup-form";
+import { Link } from "@tanstack/react-router";
+import { LandlordSignUpForm } from "../../components/auth/landlord-signup-form";
+import { TenantSignUpForm } from "../../components/auth/tenant-signup-form";
 
-export default function RegisterPage() {
+export const Route = createFileRoute("/(auth)/register")({
+  component: RegisterPage,
+});
+
+function RegisterPage() {
   const [activeTab, setActiveTab] = useState<"landlord" | "tenant">("landlord");
 
   return (

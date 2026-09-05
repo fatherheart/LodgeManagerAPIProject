@@ -1,7 +1,12 @@
-import { Link } from "react-router-dom";
-import { LoginForm } from "../components/auth/login-form";
+import { createFileRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
+import { LoginForm } from "../../components/auth/login-form";
 
-export default function LoginPage() {
+export const Route = createFileRoute("/(auth)/login")({
+  component: LoginPage,
+});
+
+function LoginPage() {
   return (
     <div className="min-h-screen w-full flex bg-charcoal-50">
       <div className="hidden lg:flex lg:w-1/2 relative bg-charcoal-900 overflow-hidden">

@@ -1,9 +1,14 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Outlet } from "@tanstack/react-router";
-import Sidebar from "./sidebar";
-import Header from "./header";
+import Sidebar from "../../components/layouts/sidebar";
+import Header from "../../components/layouts/header";
 
-export default function AppLayout() {
+export const Route = createFileRoute("/_app")({
+  component: AppLayout,
+});
+
+function AppLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (

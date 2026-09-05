@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { login, registerLandlord, registerTenant } from "../services/auth-service";
 import { processErrorMessage } from "../lib/utils";
 
@@ -13,7 +13,7 @@ export const useLogin = () => {
       localStorage.setItem("access_token", data.access_token);
       localStorage.setItem("refresh_token", data.refresh_token);
       toast.success("Successfully logged in");
-      navigate("/dashboard");
+      navigate({ to: "/dashboard" });
     },
     onError: (error) => {
       toast.error(
@@ -30,7 +30,7 @@ export const useLandlordSignUp = () => {
     mutationFn: registerLandlord,
     onSuccess: () => {
       toast.success("Account created successfully. Please log in.");
-      navigate("/login");
+      navigate({ to: "/login" });
     },
     onError: (error) => {
       toast.error(
@@ -47,7 +47,7 @@ export const useTenantSignUp = () => {
     mutationFn: registerTenant,
     onSuccess: () => {
       toast.success("Account created successfully. Please log in.");
-      navigate("/login");
+      navigate({ to: "/login" });
     },
     onError: (error) => {
       toast.error(

@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   Home,
   Building,
@@ -55,21 +55,15 @@ export function Sidebar({
 
           <nav className="space-y-1.5">
             {navItems.map(({ to, label, Icon }) => (
-              <NavLink
+              <Link
                 key={to}
                 to={to}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "bg-charcoal-900 text-white shadow-xs"
-                      : "text-charcoal-500 hover:bg-charcoal-50 hover:text-charcoal-900",
-                  )
-                }
+                className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 inactive text-charcoal-500 hover:bg-charcoal-50 hover:text-charcoal-900"
+                activeProps={{ className: "bg-charcoal-900 text-white shadow-xs !text-white" }}
               >
                 <Icon className="w-5 h-5" />
                 <span>{label}</span>
-              </NavLink>
+              </Link>
             ))}
           </nav>
         </div>

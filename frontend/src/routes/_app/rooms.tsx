@@ -1,8 +1,16 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Plus, Search } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { RoomCard, type RoomStatus } from "../components/dashboard/room-card";
-import { cn } from "../lib/utils";
+import { Button } from "../../components/ui/button";
+import {
+  RoomCard,
+  type RoomStatus,
+} from "../../components/dashboard/room-card";
+import { cn } from "../../lib/utils";
+
+export const Route = createFileRoute("/_app/rooms")({
+  component: RoomsPage,
+});
 
 // Mock Data
 export const MOCK_ROOMS = [
@@ -72,7 +80,7 @@ export const MOCK_ROOMS = [
   },
 ];
 
-export default function RoomsPage() {
+function RoomsPage() {
   const [filter, setFilter] = useState<RoomStatus | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
 

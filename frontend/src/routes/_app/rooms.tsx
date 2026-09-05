@@ -98,10 +98,10 @@ function RoomsPage() {
     <div className="space-y-8 max-w-7xl mx-auto pb-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 px-1">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-charcoal-900 tracking-tight mb-2">
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-sand-900 tracking-tight mb-2">
             Rooms & Tenants
           </h1>
-          <p className="text-charcoal-500 font-medium">
+          <p className="text-sand-500 font-medium">
             Manage your property units and view lease statuses.
           </p>
         </div>
@@ -118,7 +118,7 @@ function RoomsPage() {
       </div>
 
       <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-charcoal-200 pb-4 px-1">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-sand-200 pb-4 px-1">
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-1">
             {(["all", "safe", "warning", "overdue", "vacant"] as const).map(
               (status) => (
@@ -128,8 +128,8 @@ function RoomsPage() {
                   className={cn(
                     "px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all duration-200 whitespace-nowrap",
                     filter === status
-                      ? "bg-charcoal-900 text-white shadow-xs"
-                      : "text-charcoal-500 hover:text-charcoal-900 hover:bg-charcoal-100",
+                      ? "bg-oxford-600 text-white shadow-xs"
+                      : "text-sand-500 hover:text-sand-900 hover:bg-sand-100",
                   )}
                 >
                   {status}
@@ -141,14 +141,14 @@ function RoomsPage() {
           {/* Search Box */}
           <div className="relative shrink-0 w-full md:w-64">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-charcoal-400" />
+              <Search className="h-4 w-4 text-sand-400" />
             </div>
             <input
               type="text"
               placeholder="Search by room or tenant..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="block w-full pl-10 pr-3 py-2 border border-charcoal-200 rounded-lg bg-white placeholder-charcoal-400 focus:outline-none focus:ring-1 focus:ring-charcoal-900 focus:border-charcoal-900 sm:text-sm"
+              className="block w-full pl-10 pr-3 py-2 border border-sand-200 rounded-lg bg-white placeholder-sand-400 focus:outline-none focus:ring-1 focus:ring-sand-900 focus:border-sand-900 sm:text-sm"
             />
           </div>
         </div>
@@ -166,7 +166,7 @@ function RoomsPage() {
               />
             ))
           ) : (
-            <div className="col-span-full py-12 text-center text-charcoal-500 bg-charcoal-50 border border-charcoal-100 rounded-2xl">
+            <div className="col-span-full py-12 text-center text-sand-500 bg-sand-50 border border-sand-100 rounded-2xl">
               No rooms found matching your search or filter.
             </div>
           )}

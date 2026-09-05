@@ -31,8 +31,8 @@ const statusStyles: Record<
     label: "Overdue",
   },
   vacant: {
-    badge: "bg-charcoal-50 text-charcoal-600 border-charcoal-200",
-    progress: "bg-charcoal-200",
+    badge: "bg-sand-50 text-sand-600 border-sand-200",
+    progress: "bg-sand-200",
     label: "Vacant",
   },
 };
@@ -50,10 +50,10 @@ export function RoomCard({
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-2xl border border-charcoal-200 p-6 flex flex-col gap-4 shadow-xs hover:shadow-md hover:border-charcoal-300 transition-all duration-200 cursor-pointer group"
+      className="bg-white rounded-2xl border border-sand-200 p-6 flex flex-col gap-4 shadow-xs hover:shadow-md hover:border-sand-300 transition-all duration-200 cursor-pointer group"
     >
       <div className="flex justify-between items-center">
-        <h3 className="text-2xl font-serif font-bold text-charcoal-900 group-hover:text-terracotta-500 transition-colors">
+        <h3 className="text-2xl font-serif font-bold text-sand-900 group-hover:text-oxford-500 transition-colors">
           {number}
         </h3>
         <span
@@ -67,23 +67,23 @@ export function RoomCard({
       </div>
 
       <div className="flex-1 mt-2">
-        <p className="text-sm font-semibold text-charcoal-600">
+        <p className="text-sm font-semibold text-sand-600">
           {status === "vacant" ? "Available for lease" : tenantName}
         </p>
       </div>
 
-      <div className="space-y-2 mt-4 pt-4 border-t border-charcoal-100">
+      <div className="space-y-2 mt-4 pt-4 border-t border-sand-100">
         <div className="flex justify-between items-center text-xs font-bold uppercase tracking-wider">
-          <span className="text-charcoal-400">Lease</span>
+          <span className="text-sand-400">Lease</span>
           <span
             className={
-              status === "overdue" ? "text-rose-600" : "text-charcoal-900"
+              status === "overdue" ? "text-rose-600" : "text-sand-900"
             }
           >
             {status === "vacant" ? "--" : `${daysLeft} days left`}
           </span>
         </div>
-        <div className="w-full bg-charcoal-100 rounded-full h-1.5 overflow-hidden">
+        <div className="w-full bg-sand-100 rounded-full h-1.5 overflow-hidden">
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500",

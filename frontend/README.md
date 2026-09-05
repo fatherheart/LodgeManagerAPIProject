@@ -189,7 +189,6 @@ The backend runs at `http://127.0.0.1:8000`.
 
 Once both servers are running, the frontend at `http://localhost:5173` will communicate with the backend automatically via the Axios client configured in `src/lib/axios.ts`.
 
-
 ## Source Structure
 
 ```text
@@ -199,23 +198,23 @@ frontend/
 |   |-- components/         Reusable UI, auth, dashboard, and layout components
 |   |-- hooks/              Shared React hooks
 |   |-- lib/                Axios instance, utilities, and form validation schemas
-|   |-- pages/              Route-level pages (Login, Register, Dashboard, etc.)
+|   |-- routes/             File-based routing powered by TanStack Router
 |   |-- services/           API request functions & query hooks
 |   |-- types/              TypeScript interfaces and shared types
-|   |-- App.tsx             Route configuration & QueryClientProvider setup
+|   |-- routeTree.gen.ts    Auto-generated route tree configuration for TanStack Router (Do not edit!!!)
 |   |-- index.css           Global styles and Tailwind imports
-|   `-- main.tsx            React application entry point
+|   `-- main.tsx            React application entry point (RouterProvider setup)
 |-- index.html              Vite HTML entry
 |-- package.json            npm scripts and dependency list
 |-- package-lock.json       Locked dependency versions
 |-- tsconfig*.json          TypeScript configuration
-`-- vite.config.ts          Vite, React Compiler, Babel, and Tailwind setup
+`-- vite.config.ts          Vite, React Compiler, Babel, TanStack Router, and Tailwind setup
 ```
 
 ## Main Dependencies
 
 - **React 19 & React DOM**: Core UI library.
-- **React Router DOM v7**: Client-side routing.
+- **TanStack Router (@tanstack/react-router)**: Type-safe client-side routing.
 - **TanStack React Query v5**: Server state management & data fetching.
 - **Axios**: HTTP client with credentials support.
 - **Tailwind CSS v4 & @tailwindcss/vite**: Utility-first styling.

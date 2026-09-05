@@ -12,7 +12,7 @@ function AppLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-charcoal-50 text-charcoal-900 font-sans">
+    <div className="min-h-screen bg-sand-50 text-sand-900 font-sans">
       <div className="flex h-screen overflow-hidden relative">
         <Sidebar
           isOpen={isSidebarOpen}

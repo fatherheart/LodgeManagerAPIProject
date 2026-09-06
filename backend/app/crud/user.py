@@ -35,6 +35,14 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         stmt = select(self.model).filter(self.model.email == email)
         return db.execute(stmt).scalar_one_or_none()
 
+    def get_user_by_phone(self, db: Session, phone: str):
+        """
+        Get a user by their phone number.
+        """
+        stmt = select(self.model).filter(self.model.phone_no == phone)
+        return db.execute(stmt).scalar_one_or_none()
+
+
     def create_new_refresh_token_record(self, db: Session, refresh_in:RefreshTokenInternal):
         db_refresh_token = RefreshToken(**refresh_in.model_dump())
         db.add(db_refresh_token)

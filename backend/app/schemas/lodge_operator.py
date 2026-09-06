@@ -24,11 +24,8 @@ class AssignExistingOperatorCreate(LodgeOperatorBase):
     pass
 
 
-class RevokeOperatorRequest(LodgeOperatorBase):
-    """
-    Schema for revoking an operator user from a lodge.
-    """
-    pass
+
+
 
 
 class LodgeOperatorResponse(BaseModel):

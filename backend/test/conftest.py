@@ -26,7 +26,9 @@ pytest_plugins = [
     "test.fixtures.payment_fixtures",
     "test.fixtures.dashboard_fixtures",
     "test.fixtures.ownership_invite_fixtures",
+    "test.fixtures.operator_invite_fixtures",
 ]
+
 
 
 # =========================================================================

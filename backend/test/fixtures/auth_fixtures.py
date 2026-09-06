@@ -127,7 +127,11 @@ def other_operator_user(test_db, operator_schema_factory):
     """
     A pytest fixture that adds a secondary caretaker (Ibrahim) to the database.
     """
-    new_operator = operator_schema_factory(first_name='Operator B', email='operatorb2@gmail.com')
+    new_operator = operator_schema_factory(
+        first_name='Operator B',
+        email='operatorb2@gmail.com',
+        phone_no='081084484899'
+    )
     return user_service.sign_up_operator(test_db, operator_data=new_operator)
 
 

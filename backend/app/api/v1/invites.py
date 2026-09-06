@@ -11,9 +11,15 @@ from app.schemas.ownership_invite import (
     OwnershipInviteResponse,
     OwnershipInviteDetail
 )
+from app.schemas.operator_invite import (
+    OperatorInviteCreate,
+    OperatorInviteResponse,
+    OperatorInviteDetail
+)
 from app.schemas.lodge import LodgeResponse
 from app.schemas.error import ErrorResponseSchema
-from app.services import invite_service, ownership_invite_service
+from app.services import invite_service, ownership_invite_service, operator_invite_service
+
 
 router = APIRouter()
 
@@ -163,3 +169,103 @@ def claim_ownership_invite(
         invite_id=invite_id,
         current_user=current_user
     )
+
+
+# =========================================================================
+# 3. LODGE OPERATOR INVITATIONS
+# =========================================================================
+
+@router.post(
+    '/operator',
+    response_model=OperatorInviteResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate an operator assignment invite",
+    description="Creates a phone-locked invitation for a caretaker/operator to manage a lodge. Idempotent.",
+    response_description="The generated or existing active operator invitation",
+    responses={
+        400: {"model": ErrorResponseSchema, "description": "Operator with this phone is already assigned"},
+        401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
+        403: {"model": ErrorResponseSchema, "description": "Only the lodge owner can invite operators"},
+        404: {"model": ErrorResponseSchema, "description": "Lodge does not exist"},
+    },
+)
+def create_operator_invite(
+    invite_in: OperatorInviteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_landlord_user)
+):
+    return operator_invite_service.create_operator_invite(
+        db=db,
+        invite_in=invite_in,
+        current_user=current_user
+    )
+
+
+@router.get(
+    '/operator/{invite_id}',
+    response_model=OperatorInviteDetail,
+    summary="Preview an operator invite",
+    description="Public endpoint to inspect an operator invite by UUID token and verify its validity.",
+    response_description="Operator invite preview details",
+    responses={
+        404: {"model": ErrorResponseSchema, "description": "The operator invitation ID does not exist"},
+    },
+)
+def get_operator_invite(
+    invite_id: UUID,
+    db: Session = Depends(get_db),
+):
+    return operator_invite_service.fetch_operator_invite(
+        db=db,
+        invite_id=invite_id
+    )
+
+
+@router.delete(
+    '/operator/{invite_id}',
+    response_model=OperatorInviteResponse,
+    summary="Cancel an operator invite",
+    description="Cancels an active operator invite before it is accepted. Only the creator landlord can cancel.",
+    response_description="The cancelled operator invitation",
+    responses={
+        400: {"model": ErrorResponseSchema, "description": "Invite is already accepted, expired, or cancelled"},
+        401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
+        403: {"model": ErrorResponseSchema, "description": "Only the creator landlord can cancel this invite"},
+        404: {"model": ErrorResponseSchema, "description": "The operator invitation ID does not exist"},
+    },
+)
+def cancel_operator_invite(
+    invite_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_landlord_user)
+):
+    return operator_invite_service.cancel_operator_invite(
+        db=db,
+        invite_id=invite_id,
+        current_user=current_user
+    )
+
+
+@router.post(
+    '/operator/{invite_id}/accept',
+    response_model=OperatorInviteResponse,
+    summary="Accept an operator assignment",
+    description="Allows an authenticated operator with matching phone number to accept management of a lodge.",
+    response_description="The accepted operator invitation record",
+    responses={
+        400: {"model": ErrorResponseSchema, "description": "Phone mismatch, already assigned, or invite invalid"},
+        401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
+        403: {"model": ErrorResponseSchema, "description": "Only operators or landlords can accept"},
+        404: {"model": ErrorResponseSchema, "description": "The operator invitation ID does not exist"},
+    },
+)
+def accept_operator_invite(
+    invite_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_operator_or_landlord_user)
+):
+    return operator_invite_service.accept_operator_invite(
+        db=db,
+        invite_id=invite_id,
+        current_user=current_user
+    )

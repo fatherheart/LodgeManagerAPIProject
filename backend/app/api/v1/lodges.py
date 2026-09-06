@@ -16,9 +16,11 @@ from app.schemas.error import ErrorResponseSchema
 from app.models.user import User
 from app.crud.lodge import crud_lodge
 from app.schemas.lodge import LodgeResponse
-from app.services import lodge_service, tenant_services
+from app.schemas.lodge_operator import LodgeOperatorResponse
+from app.services import lodge_service, tenant_services, operator_invite_service
 
 router = APIRouter()
+
 
 
 @router.post(
@@ -204,3 +206,32 @@ def update_lodge_details(
         update_data=update_data,
         current_user=current_user
     )
+
+
+@router.patch(
+    '/{lodge_id}/operators/{operator_id}',
+    response_model=LodgeOperatorResponse,
+    summary="Revoke an operator from a lodge",
+    description="Allows the lodge owner to revoke an active operator's management access.",
+    response_description="The updated lodge operator junction record",
+    responses={
+        400: {"model": ErrorResponseSchema, "description": "Operator is not actively assigned to this lodge"},
+        401: {"model": ErrorResponseSchema, "description": "Missing, invalid, or expired access token"},
+        403: {"model": ErrorResponseSchema, "description": "Only the lodge owner can revoke operators"},
+        404: {"model": ErrorResponseSchema, "description": "Lodge not found"},
+    },
+)
+def revoke_operator(
+    lodge_id: int,
+    operator_id: int,
+    db: Session = Depends(get_db),
+    landlord_user: User = Depends(get_landlord_user)
+):
+    return operator_invite_service.revoke_operator(
+        db=db,
+        lodge_id=lodge_id,
+        operator_id=operator_id,
+        current_user=landlord_user
+    )
+
+

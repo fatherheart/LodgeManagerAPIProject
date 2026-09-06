@@ -40,7 +40,7 @@ class OperatorInvite(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid7)
     lodge_id: Mapped[int] = mapped_column(ForeignKey('lodges.id', ondelete='CASCADE'), nullable=False)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    target_phone_no: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_phone_no: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     status: Mapped[Optional[OperatorInviteStatus]] = mapped_column(
         SQLEnum(OperatorInviteStatus),
         nullable=True  # NULL means no action yet (invite is active by default)
@@ -78,10 +78,11 @@ class OperatorInvite(Base):
         Derive the effective status without writing a cron job or touching the DB.
         Priority: time (EXPIRED) > stored status > default ACTIVE.
         """
+        if self.status is not None:
+            return self.status
         curr_time = datetime.now(timezone.utc).replace(tzinfo=None)
         if curr_time > self.expires_at:
             return OperatorInviteStatus.EXPIRED
-        if self.status is not None:
-            return self.status
         return OperatorInviteStatus.ACTIVE
+
 

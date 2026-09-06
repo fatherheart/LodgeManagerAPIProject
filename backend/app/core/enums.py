@@ -84,3 +84,4 @@ class OperatorInviteStatus(str, Enum):
     ACTIVE = 'Active'
     ACCEPTED = 'Accepted'
     EXPIRED = 'Expired'
+    CANCELLED = 'Cancelled'

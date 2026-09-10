@@ -12,7 +12,7 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy import func
 from app.db.session import Base
 from sqlalchemy import String, Enum, ForeignKey, DateTime
-from app.core.enums import RoomStatus
+from app.core.enums import RoomStatus, LeaseStatus
 
 from typing import TYPE_CHECKING
 
@@ -21,6 +21,7 @@ from app.schemas.room import RoomGridSummary
 if TYPE_CHECKING:
     from app.models.lodge import Lodge
     from app.models.lease import Lease
+    from app.models.invitation import Invite
 
 
 class Room(Base):
@@ -37,6 +38,7 @@ class Room(Base):
         created_at (datetime): Timestamp when the room was created.
         leases (Lease): Relationship to the leases associated with this room.
         lodge (Lodge): Relationship to the lodge containing this room.
+        invites (list[Invite]): Relationship to invitations sent for this room.
     """
     __tablename__ = 'rooms'
 
@@ -53,6 +55,7 @@ class Room(Base):
     )
     leases: Mapped[list["Lease"]] = relationship( back_populates='room')
     lodge: Mapped["Lodge"] = relationship( back_populates='rooms')
+    invites: Mapped[list["Invite"]] = relationship(back_populates='room', cascade='all, delete-orphan')
 
     __table_args__ = (
         UniqueConstraint(
@@ -67,11 +70,27 @@ class Room(Base):
             return RoomStatus.MAINTENANCE
 
         has_active_lease = any(
-            lease.status is None and lease.end_date >= date.today()
+            (lease.status is None or lease.status == LeaseStatus.PENDING_TERMINATION)
             for lease in self.leases
         )
 
         return RoomStatus.OCCUPIED if has_active_lease else RoomStatus.VACANT
+
+    @property
+    def is_occupied(self) -> bool:
+        """Check if the room is currently occupied by an active tenant lease."""
+        return self.computed_status == RoomStatus.OCCUPIED
+
+    @property
+    def is_vacant(self) -> bool:
+        """Check if the room is vacant and ready for leasing."""
+        return self.computed_status == RoomStatus.VACANT
+
+    @property
+    def is_maintenance(self) -> bool:
+        """Check if the room is under maintenance."""
+        return self.computed_status == RoomStatus.MAINTENANCE
+
 
 
 @dataclass

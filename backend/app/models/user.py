@@ -16,12 +16,13 @@ if TYPE_CHECKING:
     from app.models.tenantprofile import TenantProfile
     from app.models.lodge import Lodge
     from app.models.refresh_token import RefreshToken
+    from app.models.lodge_operator import LodgeOperator
 
 
 
 class User(Base):
     """
-    Represents an application user (e.g., landlord or tenant).
+    Represents an application user (e.g., landlord, tenant, or operator).
 
     Attributes:
         id (int): Primary key.
@@ -30,10 +31,11 @@ class User(Base):
         phone_no (str): The user's phone number.
         email (str): The user's email address.
         hashed_password (str): The user's hashed password.
-        role (UserRole): The user's role in the system (e.g., LANDLORD, TENANT).
+        role (UserRole): The user's role in the system (e.g., LANDLORD, TENANT, OPERATOR).
         created_at (datetime): Timestamp when the user was created.
         is_active (bool): Indicates if the user account is active.
         lodges (list[Lodge]): Relationship to the lodges owned by the user (if landlord).
+        operated_lodges (list[LodgeOperator]): Relationship to lodges operated by the user (if operator).
         tenant_profile (TenantProfile): Relationship to the user's tenant profile (if tenant).
         refresh_tokens (list[RefreshToken]): Relationship to the refresh tokens owned by this user
     """
@@ -59,7 +61,16 @@ class User(Base):
     # Fixed: Updated to 2.0 mapped_column to resolve the InstrumentedAttribute error
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
-    lodges: Mapped[list["Lodge"]] = relationship(back_populates='owner', cascade='all, delete-orphan')
+    lodges: Mapped[list["Lodge"]] = relationship(
+        back_populates='owner',
+        cascade='all, delete-orphan',
+        foreign_keys='[Lodge.landlord_id]'
+    )
+    operated_lodges: Mapped[list["LodgeOperator"]] = relationship(
+        back_populates='operator',
+        cascade='all, delete-orphan',
+        foreign_keys='[LodgeOperator.operator_id]'
+    )
     tenant_profile: Mapped["TenantProfile"] = relationship(
         back_populates='user',
         cascade='all, delete-orphan',

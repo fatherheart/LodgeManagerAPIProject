@@ -59,7 +59,7 @@ class Lease(Base):
 
     @property
     def tenant_name(self) -> str:
-        return f'{self.tenant.user.first_name} {self.tenant.user.last_name}' if self.tenant else 'Unknown'
+        return f'{self.tenant.user.first_name} {self.tenant.user.last_name}' if self.tenant else 'N/A'
 
     @property
     def room_no(self) -> str:

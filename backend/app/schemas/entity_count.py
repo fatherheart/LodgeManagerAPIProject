@@ -41,29 +41,7 @@ class OccupiedCounts(BaseModel):
     safe: int = Field(..., description="Number of rooms with safe leases.", examples=[10])
     expiring: int = Field(..., description="Number of rooms with expiring leases.", examples=[5])
     overdue: int = Field(..., description="Number of rooms with overdue payments.", examples=[2])
-    pending: int = Field(..., description="Number of rooms with pending leases.", examples=[1])
+    pending_moveout: int = Field(..., description="Number of rooms with move_out request on their leases", examples=[1])
     owing: int = Field(..., description="Number of rooms with owing balances.", examples=[3])
 
 
-if __name__ == "__main__":
-    mock_entity_count_dict = {
-        'total_rooms': 40,
-        'total_tenants': 35,
-        'room_status_counts': {
-            'occupied': 30,
-            'vacant': 6,
-            'maintenance':   4
-        },
-        'occupied_counts': {
-            'safe': 10,
-            'expiring': 10,
-            'overdue': 2,
-            'owing': 8
-        }
-    }
-    try:
-        mock_entity_count_schema = EntityCountResponse(**mock_entity_count_dict)
-        print(mock_entity_count_schema.model_dump_json(indent=4))
-
-    except ValidationError as e:
-        raise e

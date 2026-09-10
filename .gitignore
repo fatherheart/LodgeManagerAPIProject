@@ -1,26 +1,58 @@
 # IDE & Custom Settings
+
 .idea/
+
 .agents/
+
 .vscode/
 
+
+
 # Planning & Strategy Docs
+
 mentor_prompt.md
+
 Todo.md
+
 lodge_manager_plan.md
+
 frontend_architecture.md
+
 frontend_mock.html
+
 ORIGINAL_REQUEST.md
+
 marketability_analysis.md
+
 gtm_marketing_playbook.md
+
 unizik_revenue_projection.md
 
+paystack_hub_spoke_poc
+
 # Python
+
 .venv/
+
 __pycache__/
+
 .pytest_cache/
+
 htmlcov/
+
 .coverage
 
+
+
 # OS
+
 .DS_Store
+
 Thumbs.db
+
+/*.py
+
+openapi_dump.json
+
+backend_dump.txt
+

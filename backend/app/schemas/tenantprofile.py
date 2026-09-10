@@ -3,13 +3,13 @@ Pydantic schemas for the tenant profile domain.
 
 This module contains schemas used to represent, create, and update tenant profiles.
 """
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
+from typing import Optional
 
-from pydantic import BaseModel, field_validator, ConfigDict, Field
+from pydantic import BaseModel, field_validator, model_validator, ConfigDict, Field
 
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
-from typing import Optional
 from app.core.enums import TenantType, StudentLevel, TenantStatus
 
 
@@ -52,9 +52,24 @@ class TenantInfoUpdate(BaseModel):
     level: Optional[StudentLevel] = Field(None, description="The academic level if the tenant is a student.", examples=["100L"])
     reg_no: Optional[int] = Field(None, description="The registration number.", examples=[123456])
     department: Optional[str] = Field(None, description="The academic department.", examples=["Computer Science"])
-
+ 
 class TenantStatusUpdate(BaseModel):
     status: Optional[TenantStatus] = Field(None, description="The status of the tenant.", examples=["active"])
+
+
+class TenantApprovalCreate(BaseModel):
+    start_date: date = Field(..., description="The start date of the lease.", examples=["2026-01-01"])
+    end_date: date = Field(..., description="The end date of the lease.", examples=["2026-12-31"])
+    agreed_rent_amt: int = Field(..., ge=0, description="The agreed ANNUAL rental amount in KOBO.", examples=[20000000])
+    total_amt_paid: int = Field(..., gt=0, description="The initial upfront payment in KOBO.", examples=[20000000])
+
+    @model_validator(mode='after')
+    def validate_lease_terms(self):
+        if self.end_date <= self.start_date:
+            raise ValueError("Lease end date must be after the start date.")
+        if self.total_amt_paid > self.agreed_rent_amt:
+            raise ValueError("Upfront payment cannot exceed agreed rent amount.")
+        return self
 
 
 class TenantProfileResponse(TenantBase):

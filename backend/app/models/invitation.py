@@ -13,6 +13,8 @@ import uuid
 
 if TYPE_CHECKING:
     from app.models.lodge import Lodge
+    from app.models.room import Room
+    from app.models.tenantprofile import TenantProfile
 
 class Invite(Base):
     """
@@ -20,7 +22,8 @@ class Invite(Base):
     
     Attributes:
         id: Primary key UUID for the invitation.
-        lodge_id: Foreign key referencing the lodge the invite is for.
+        room_id: Foreign key referencing the room the invite is for.
+        accepted_by_tenant_id: Foreign key referencing the tenant who redeemed the invite.
         created_at: Timestamp when the invite was generated.
         expires_at: Timestamp when the invite expires.
         status: The current status of the invite (SENT, ACCEPTED, EXPIRED).
@@ -28,15 +31,30 @@ class Invite(Base):
     __tablename__ = 'invites'
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid7)
-    lodge_id: Mapped[int] = mapped_column(ForeignKey('lodges.id'), nullable=False)
+    room_id: Mapped[int] = mapped_column(ForeignKey('rooms.id', ondelete='CASCADE'), nullable=False)
+    accepted_by_tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey('tenant_profiles.id', ondelete='SET NULL'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
     status: Mapped[InviteStatus] = mapped_column(default=InviteStatus.SENT, nullable=False)
-    lodge: Mapped["Lodge"] = relationship(back_populates='invites')
+
+    room: Mapped["Room"] = relationship(back_populates='invites')
+    accepted_by_tenant: Mapped[Optional["TenantProfile"]] = relationship(back_populates='invite')
+
+    @property
+    def lodge(self):
+        return self.room.lodge if self.room else None
+
+    @property
+    def lodge_id(self):
+        return self.room.lodge_id if self.room else None
 
     @property
     def lodge_name(self):
-        return self.lodge.name if self.lodge else 'N/A'
+        return self.room.lodge.name if self.room and self.room.lodge else 'N/A'
+
+    @property
+    def room_no(self):
+        return self.room.room_no if self.room else 'N/A'
 
     @property
     def is_expired(self):

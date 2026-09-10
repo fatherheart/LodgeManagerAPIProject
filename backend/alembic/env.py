@@ -21,17 +21,21 @@ if config.config_file_name is not None:
 
 from app.db import base
 from app.models.lease import Lease
-from app.models.payment import  Payment
+from app.models.payment import Payment
 from app.models.user import User
 from app.models.lodge import Lodge
-from app.models.room import  Room
+from app.models.room import Room
 from app.models.tenantprofile import TenantProfile
 from app.core import enums
 from app.models.refresh_token import RefreshToken
 from app.models.invitation import Invite
+from app.models.lodge_operator import LodgeOperator
+from app.models.ownership_invite import OwnershipInvite
+from app.models.operator_invite import OperatorInvite
 from app.core.config import settings
 from app.db.session import Base
 target_metadata = Base.metadata
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

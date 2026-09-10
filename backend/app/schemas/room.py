@@ -42,6 +42,18 @@ class RoomResponse(RoomCreate):
     status: RoomStatus = Field(..., description="The current status of the room.",
                                examples=["vacant"], validation_alias='computed_status')
     created_at: datetime = Field(..., description="Timestamp when the room was created.", examples=["2026-07-04T06:05:02Z"])
+    
+    has_active_invite: bool = Field(False, description="Whether the room has an active invite.")
+    pending_applicant: Optional['PendingApplicantSummary'] = Field(None, description="The pending applicant details if any.")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PendingApplicantSummary(BaseModel):
+    tenant_id: int = Field(..., description="The ID of the pending tenant.", examples=[1])
+    first_name: str = Field(..., description="Tenant's first name.", examples=["John"])
+    last_name: str = Field(..., description="Tenant's last name.", examples=["Doe"])
+    phone_no: str = Field(..., description="Tenant's phone number.", examples=["+2348012345678"])
 
     model_config = ConfigDict(from_attributes=True)
 

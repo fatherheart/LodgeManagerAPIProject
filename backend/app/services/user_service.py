@@ -19,6 +19,22 @@ from app.schemas.refresh_token import RefreshTokenInternal
 from app.schemas.user import UserCreate, UserInternal
 
 
+def setup_signup_data_internal(db: Session, signup_data: UserCreate, role: UserRole):
+    user = crud_user.get_user_by_email(db, email=signup_data.email)
+
+    if user:
+        raise UserAlreadyExistError(email=signup_data.email)
+
+    hashed = get_password_hash(signup_data.password)
+
+    base_user_data = UserInternal(
+        **signup_data.model_dump(exclude={'password'}),
+        hashed_password=hashed,
+        role=role
+    )
+
+    return base_user_data
+
 def sign_up_landlord(
         db: Session,
         landlord_data: UserCreate,
@@ -33,21 +49,25 @@ def sign_up_landlord(
     Returns:
         User: The newly created user.
     """
-    user = crud_user.get_user_by_email(db, email=landlord_data.email)
+    landlord_internal_data = setup_signup_data_internal(db, signup_data=landlord_data, role=UserRole.LANDLORD)
+    return crud_user.create(db, obj_in=landlord_internal_data)
 
-    if user:
-        raise UserAlreadyExistError(email=landlord_data.email)
+def sign_up_operator(
+        db: Session,
+        operator_data: UserCreate,
+) -> User:
+    """
+    Sign up a new pilot operator.
 
-    hashed = get_password_hash(landlord_data.password)
+    Args:
+        db (Session): The database session.
+        operator_data (UserCreate): The data for the new operator.
 
-    base_user_data = UserInternal(
-        **landlord_data.model_dump(exclude={'password'}),
-        hashed_password=hashed,
-        role=UserRole.LANDLORD
-    )
-
-    return crud_user.create(db, obj_in=base_user_data)
-
+    Returns:
+        User: The newly created operator user.
+    """
+    operator_internal_signup_data =  setup_signup_data_internal(db, signup_data=operator_data, role=UserRole.OPERATOR)
+    return crud_user.create(db, obj_in=operator_internal_signup_data)
 
 def authenticate_user(db: Session, email: str, password: str):
     """

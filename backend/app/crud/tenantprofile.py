@@ -11,7 +11,9 @@ from app.core.enums import InviteStatus, TenantStatus
 from app.models.invitation import Invite
 from app.models.tenantprofile import TenantProfile
 from app.models.user import User
-from app.schemas.tenantprofile import TenantProfileCreate, TenantProfileUpdate, TenantInfoUpdate
+from app.models.lease import Lease
+from app.models.payment import Payment
+from app.schemas.tenantprofile import TenantProfileCreate, TenantProfileUpdate, TenantInfoUpdate, TenantApprovalCreate
 from sqlalchemy.orm import Session
 from app.crud.base_crud import CRUDBase, ModelType
 from app.schemas.user import  UserInternal, UserUpdate
@@ -43,6 +45,8 @@ class CRUDTenantProfile(CRUDBase[TenantProfile, TenantProfileCreate, TenantProfi
         db_tenant = self.model(**tenant_in.tenant_info.model_dump(), lodge_id=db_invite.lodge_id)
         db_user.tenant_profile = db_tenant
         db.add(db_user)
+        db.flush()
+        db_invite.accepted_by_tenant = db_tenant
         db_invite.status = InviteStatus.ACCEPTED
         db.commit()
         db.refresh(db_tenant)
@@ -113,7 +117,69 @@ class CRUDTenantProfile(CRUDBase[TenantProfile, TenantProfileCreate, TenantProfi
             db.rollback()
             raise e
 
+    def approve_and_create_lease(
+        self,
+        db: Session,
+        tenant: TenantProfile,
+        room_id: int,
+        approval_data: TenantApprovalCreate
+    ) -> Lease:
+        """
+        Atomically approve a tenant profile, generate their lease, and record initial payment.
 
+        Args:
+            db (Session): The database session.
+            tenant (TenantProfile): The tenant profile being approved.
+            room_id (int): The ID of the room being assigned.
+            approval_data (TenantApprovalCreate): Explicit lease terms and payment amount.
+
+        Returns:
+            Lease: The newly created lease.
+        """
+        db_lease = Lease(
+            tenant_id=tenant.id,
+            room_id=room_id,
+            start_date=approval_data.start_date,
+            end_date=approval_data.end_date,
+            agreed_rent_amt=approval_data.agreed_rent_amt
+        )
+
+        if approval_data.total_amt_paid > 0:
+            db_payment = Payment(amount_paid=approval_data.total_amt_paid)
+            db_lease.payments.append(db_payment)
+
+        tenant.status = TenantStatus.APPROVED
+
+        try:
+            db.add(db_lease)
+            db.add(tenant)
+            db.commit()
+            db.refresh(db_lease)
+            return db_lease
+        except Exception as e:
+            db.rollback()
+            raise e
+
+    def reject_tenant(self, db: Session, tenant: TenantProfile) -> TenantProfile:
+        """
+        Reject a tenant application and persist status in database.
+
+        Args:
+            db (Session): The database session.
+            tenant (TenantProfile): The tenant profile being rejected.
+
+        Returns:
+            TenantProfile: The updated tenant profile.
+        """
+        tenant.status = TenantStatus.REJECTED
+        try:
+            db.add(tenant)
+            db.commit()
+            db.refresh(tenant)
+            return tenant
+        except Exception as e:
+            db.rollback()
+            raise e
 
 
 crud_tenant = CRUDTenantProfile(TenantProfile)

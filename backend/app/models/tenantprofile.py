@@ -10,12 +10,14 @@ from app.core.enums import TenantType, StudentLevel, TenantStatus
 from app.db.session import  Base
 from sqlalchemy import String, Enum, ForeignKey
 from sqlalchemy.orm import relationship, mapped_column, Mapped
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+import uuid
 
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.lodge import Lodge
     from app.models.lease import Lease
+    from app.models.invitation import Invite
 
 
 class TenantProfile(Base):
@@ -26,6 +28,7 @@ class TenantProfile(Base):
         id (int): Primary key.
         user_id (int): Foreign key to the associated user account.
         lodge_id (int): Foreign key to the lodge where the tenant resides.
+        invite_id (UUID | None): Foreign key to the invitation used during onboarding.
         tenant_type (TenantType): The type of tenant (e.g., STUDENT, PROFESSIONAL).
         emergency_contact_name (str): Name of the emergency contact.
         emergency_contact_phone_no (str): Phone number of the emergency contact.
@@ -35,6 +38,7 @@ class TenantProfile(Base):
         user (User): Relationship to the associated user account.
         lodge (Lodge): Relationship to the associated lodge.
         leases (Lease): Relationship to the tenant's leases.
+        invite (Invite): Relationship to the onboarding invitation.
     """
     __tablename__ = 'tenant_profiles'
 
@@ -51,6 +55,7 @@ class TenantProfile(Base):
     user: Mapped["User"] = relationship(back_populates='tenant_profile', cascade='all, delete-orphan', single_parent=True)
     lodge: Mapped["Lodge"] = relationship(back_populates='tenantprofiles')
     leases: Mapped[list["Lease"]] = relationship(back_populates='tenant')
+    invite: Mapped[Optional["Invite"]] = relationship(back_populates='accepted_by_tenant', uselist=False)
 
     @property
     def is_active(self):

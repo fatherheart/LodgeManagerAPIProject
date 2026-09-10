@@ -1,10 +1,15 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { StatCard } from "../components/dashboard/stat-card";
-import { RoomCard } from "../components/dashboard/room-card";
+import { Button } from "../../components/ui/button";
+import { StatCard } from "../../components/dashboard/stat-card";
+import { RoomCard } from "../../components/dashboard/room-card";
 import { MOCK_ROOMS } from "./rooms";
 
-export default function DashboardPage() {
+export const Route = createFileRoute("/_app/dashboard")({
+  component: DashboardPage,
+});
+
+function DashboardPage() {
   const actionNeededRooms = MOCK_ROOMS.filter(
     (r) => r.status === "warning" || r.status === "overdue",
   );
@@ -13,10 +18,10 @@ export default function DashboardPage() {
     <div className="space-y-10 max-w-7xl mx-auto pb-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-charcoal-900 tracking-tight mb-2">
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-sand-900 tracking-tight mb-2">
             Property Overview
           </h1>
-          <p className="text-charcoal-500 font-medium">
+          <p className="text-sand-500 font-medium">
             Real-time metrics and lease health for your UNIZIK lodge.
           </p>
         </div>
@@ -50,8 +55,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="space-y-6 pt-6">
-        <div className="flex items-center justify-between border-b border-charcoal-200 pb-4">
-          <h2 className="text-xl font-serif font-bold text-charcoal-900">
+        <div className="flex items-center justify-between border-b border-sand-200 pb-4">
+          <h2 className="text-xl font-serif font-bold text-sand-900">
             Action Needed
           </h2>
         </div>
@@ -68,7 +73,7 @@ export default function DashboardPage() {
             />
           ))}
           {actionNeededRooms.length === 0 && (
-            <div className="col-span-full py-8 text-center text-charcoal-500 bg-charcoal-50 border border-charcoal-100 rounded-2xl">
+            <div className="col-span-full py-8 text-center text-sand-500 bg-sand-50 border border-sand-100 rounded-2xl">
               All leases are up to date. No immediate action required.
             </div>
           )}

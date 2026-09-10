@@ -1,45 +1,21 @@
-# LodgeOps — Lodge Management API
+# Backend — LodgeOps API
 
-**A modern, enterprise-grade property management backend** built with FastAPI.
+FastAPI backend for the LodgeOps property management system.
 
-LodgeOps is a production-quality REST API that handles everything a residential lodge or student accommodation needs: tenant onboarding (via a secure invite system), room lifecycle management, lease contracts, rent payment tracking, and real-time financial dashboard analytics.
+> For a full project overview, architecture, and quick-start guide, see the [root README](../README.md).
 
 ---
 
 ## 📋 Table of Contents
 
-- [Features](#-features)
 - [Tech Stack](#-tech-stack)
-- [Architecture](#-architecture-the-n-tier-pattern)
+- [Backend Architecture](#-backend-architecture)
 - [Domain Model](#-domain-model)
 - [API Reference](#-api-reference)
 - [Project Structure](#-project-structure)
-- [Getting Started](#-getting-started)
-- [Environment Variables](#-environment-variables)
+- [Local Setup](#-local-setup)
 - [Running Tests](#-running-tests)
 - [Contributing](#-contributing)
-
----
-
-## 🚀 Features
-
-### Core Business Modules
-- **Authentication & Authorization:** Stateless JWT-based auth with rotating Refresh Tokens stored as HTTP-only cookies. Role-based access control (Landlord & Tenant) enforced at the dependency injection layer on every endpoint.
-- **Invite-Only Tenant Registration:** Tenants cannot self-register. Landlords generate time-limited UUID invite links scoped to a specific lodge. Tenants submit requests and are held in a `PENDING` state until the Landlord approves them.
-- **Lodge & Room Management:** Landlords can create lodges and bulk-generate rooms using a `RoomGenerator` payload (prefix, range, default rent). Room status is tracked across three states: `Vacant`, `Occupied`, and `Maintenance`.
-- **Lease Lifecycle Management:** Full contract lifecycle from creation to termination. Lease status (`Active`, `Overdue`, `Pending_Termination`, `Terminated`) is **never stored** in the database — it is computed dynamically via a Python `@property` on the model to prevent stale states.
-- **Append-Only Payment Ledger:** Every rent collection creates a new payment record. Records are never edited. Outstanding balances and revenue metrics are computed at query time using SQL aggregations.
-
-### Advanced Dashboard & Analytics
-- **Landlord Dashboard:** Real-time lodge overview including financial performance and a room intelligence grid categorising every room as Safe, Expiring, Overdue, Owing, Vacant, or Maintenance.
-- **Financial Aggregations:** `func.sum` and `outerjoin` compute Potential Revenue, Expected Revenue, Collected Revenue, and Unpaid Rent directly in the database. No Python loops over ORM objects.
-- **Tenant Dashboard:** Personal lease status, payment history, and outstanding balance for the authenticated tenant.
-
-### Technical Highlights
-- **Clean N-Tier Architecture:** Hard separation between Presentation (`api/`), Business Logic (`services/`), Data Access (`crud/`), Domain Models (`models/`), and Data Contracts (`schemas/`).
-- **Pydantic v2 Strict Contracts:** `Create`, `Update`, and `Response` schemas are always separate objects per domain. `LeaseUpdate` is intentionally restricted to `end_date` and `agreed_rent_amt` only — `tenant_id`, `room_id`, and `start_date` cannot be mutated post-creation.
-- **Alembic Migrations:** All schema changes go through versioned Alembic migrations. `Base.metadata.create_all()` is not used in any production flow.
-- **Comprehensive Test Suite:** 150+ tests with an isolated in-memory SQLite test database. 96%+ code coverage across all layers.
 
 ---
 
@@ -57,138 +33,78 @@ LodgeOps is a production-quality REST API that handles everything a residential 
 
 ---
 
-## 🏗 Architecture: The N-Tier Pattern
+## 🏗 Backend Architecture
 
-Every feature request passes strictly through the following layers. No layer skips another.
+Every request passes through exactly these layers in order. No layer may skip another.
 
 ```
 HTTP Request
      │
      ▼
-┌─────────────────────────────────────────────────┐
-│         Presentation Layer  (app/api/v1/)        │
-│  FastAPI Routers + Dependency Injection          │
-│  [No SQL. No Business Logic.]                    │
-└───────────────────┬─────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────┐
-│      Business Logic Layer  (app/services/)       │
-│  Orchestrates workflows, enforces domain rules   │
-│  [No HTTP objects. No raw SQL.]                  │
-└───────────────────┬─────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────┐
-│       Data Access Layer  (app/crud/)             │
-│  Raw SQLAlchemy queries + aggregations           │
-│  [No business logic.]                            │
-└───────────────────┬─────────────────────────────┘
-                    │
-                    ▼
-┌────────────────────────────┐  ┌─────────────────────────────┐
-│  Domain Models (app/models/)│  │  Data Contracts (app/schemas/)│
-│  SQLAlchemy ORM + @property │  │  Pydantic Create/Update/     │
-│  + Cascade rules            │  │  Response per domain         │
-└────────────────────────────┘  └─────────────────────────────┘
-                    │
-                    ▼
-              Database (SQLite / PostgreSQL)
+┌──────────────────────────────────────┐
+│  Presentation  (app/api/v1/)         │
+│  FastAPI Routers + Dependency        │
+│  Injection. No SQL. No business      │
+│  logic.                              │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  Business Logic  (app/services/)     │
+│  Domain rules, workflow              │
+│  orchestration. No HTTP objects.     │
+│  No raw SQL.                         │
+└──────────────┬───────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────┐
+│  Data Access  (app/crud/)            │
+│  SQLAlchemy queries, aggregations,   │
+│  and joins. No business logic.       │
+└──────────────┬───────────────────────┘
+               │
+     ┌─────────┴──────────┐
+     ▼                    ▼
+┌──────────┐     ┌──────────────────┐
+│  Models  │     │  Schemas         │
+│ (ORM +   │     │  (Pydantic v2    │
+│ @property│     │  Create/Update/  │
+│ + cascade│     │  Response DTOs)  │
+└────┬─────┘     └──────────────────┘
+     │
+     ▼
+  Database
 ```
+
+**Key design rules:**
+- Lease `status` is stored as `NULL` (Active/Overdue), `Pending_Termination`, or `Terminated`. Never compute and store `Active`/`Overdue` — those are derived at runtime via `@property computed_status`.
+- Payment ledger is **append-only**. Balances and totals are computed via `func.sum` + `outerjoin` at the database level, never by looping over ORM objects in Python.
+- Tenant data isolation: every landlord-scoped query filters by `landlord_id`. A landlord can never read or mutate another landlord's data.
 
 ---
 
 ## 🗄 Domain Model
 
-The system is built on 8 core entities:
-
 | Entity | Table | Purpose |
 |---|---|---|
-| **User** | `users` | Core identity for both Landlords and Tenants. Holds email, hashed password, and role. |
-| **RefreshToken** | `refresh_tokens` | Tracks active refresh tokens per user for secure token rotation and logout. |
-| **Invite** | `invitations` | UUID-based invite links generated by Landlords, scoped to a Lodge with an expiry. |
-| **Lodge** | `lodges` | A physical property owned by a Landlord. Parent of all Rooms and TenantProfiles. |
-| **Room** | `rooms` | An individual rentable unit within a Lodge. Tracks status and base rent price. |
-| **TenantProfile** | `tenant_profiles` | Extended profile for Tenant users — Student Level, department, emergency contacts. |
-| **Lease** | `leases` | The contract linking a Tenant to a Room. Status computed dynamically, never stored stale. |
-| **Payment** | `payments` | Append-only ledger of every rent collection. Balances computed via SQL aggregation. |
+| **User** | `users` | Core identity for Landlords and Tenants (email, hashed password, role). |
+| **RefreshToken** | `refresh_tokens` | Whitelist of active refresh tokens. Rotation and revocation on logout. |
+| **Invitation** | `invitations` | UUID invite links scoped to a Lodge with an expiry timestamp. |
+| **Lodge** | `lodges` | A physical property owned by a Landlord. Parent of Rooms and TenantProfiles. |
+| **Room** | `rooms` | A rentable unit within a Lodge. Tracks `room_status` and `base_rent_price`. |
+| **TenantProfile** | `tenant_profiles` | Extended profile: Student Level, Department, Emergency Contacts, Approval Status. |
+| **Lease** | `leases` | Rental contract linking a Tenant to a Room. Status column is `NULL` (active/overdue), `Pending_Termination`, or `Terminated`. |
+| **Payment** | `payments` | Append-only rent payment ledger. |
 
-**Key Cascade Rule:** Deleting a `Lodge` cascades to all its `Rooms`, `TenantProfiles`, and `Invites` via `ondelete='CASCADE'` at the DB level and `cascade='all, delete-orphan'` at the ORM level.
+**Cascade rule:** Deleting a `Lodge` cascades via `ondelete='CASCADE'` (DB) and `cascade='all, delete-orphan'` (ORM) to all its Rooms, TenantProfiles, and Invitations.
 
 ---
 
 ## 📡 API Reference
 
-All routes are prefixed with `/api/v1`. Interactive documentation is available at `/docs` once the server is running.
+> For the full API specification, Layer-by-Layer Code Audit, and System Flow, see the **[LODGEOPS_MASTER_SPEC.md](../LODGEOPS_MASTER_SPEC.md)** in the project root.
 
-### Authentication — `/api/v1/auth`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/register/landlord` | Public | Register a new Landlord account |
-| `POST` | `/register/tenant` | Public (requires Invite UUID) | Register a new Tenant via invite link |
-| `POST` | `/login` | Public | Authenticate and receive tokens as HTTP-only cookies |
-| `POST` | `/refresh` | Authenticated | Rotate access token using refresh cookie |
-| `GET` | `/me` | Authenticated | Get the currently authenticated user's profile |
-| `POST` | `/logout` | Authenticated | Invalidate refresh token and clear session cookies |
-
-### Lodges — `/api/v1/lodges`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/register` | Landlord | Create a new lodge (with optional bulk room generation) |
-| `GET` | `/` | Landlord | Get all lodges owned by the authenticated landlord |
-| `GET` | `/{lodge_id}` | Landlord | Get a specific lodge by ID |
-| `PATCH` | `/{lodge_id}` | Landlord | Update lodge name or address |
-| `GET` | `/{lodge_id}/tenants` | Landlord | List all tenants in a lodge |
-| `PATCH` | `/{lodge_id}/rooms/bulk-update` | Landlord | Bulk update base rent for selected rooms |
-
-### Rooms — `/api/v1/rooms`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/` | Landlord | Add a new room to a lodge |
-| `GET` | `/{lodge_id}/rooms` | Landlord | Get all rooms in a lodge |
-| `PATCH` | `/{room_id}` | Landlord | Update room details or status |
-
-### Tenants — `/api/v1/tenants`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/profile` | Tenant | Get the authenticated tenant's own profile |
-| `PATCH` | `/profiles/me` | Tenant | Update the authenticated tenant's own profile |
-| `PATCH` | `/{tenant_id}/status` | Landlord | Approve or reject a pending tenant |
-
-### Leases — `/api/v1/leases`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/` | Landlord | Create a new lease (room must be vacant, tenant must be in same lodge) |
-| `GET` | `/{lodge_id}` | Landlord | Get all leases in a lodge with optional filters |
-| `GET` | `/me` | Tenant | Get the authenticated tenant's own lease history |
-| `PATCH` | `/{lease_id}` | Landlord | Amend `end_date` or `agreed_rent_amt` only |
-| `PATCH` | `/terminate/{lease_id}` | Landlord | Terminate an active lease |
-| `PATCH` | `/appeal/{lease_id}` | Tenant | Submit a termination appeal for own lease |
-| `GET` | `/{lodge_id}/occupied-rooms` | Landlord | Get all occupied rooms categorised by health status |
-
-### Payments — `/api/v1/payments`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/create-payment` | Landlord | Record a rent payment against a lease |
-| `GET` | `/{lease_id}` | Landlord | Get payment history for a specific lease |
-| `GET` | `/me/{lease_id}` | Tenant | Get own payment history for a specific lease |
-
-### Invites — `/api/v1/invites`
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `POST` | `/` | Landlord | Generate a new invite link for a lodge |
-| `GET` | `/{invite_id}` | Public | Retrieve invite details (validates before tenant registers) |
-
-### Dashboards
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/dashboard-landlord/{lodge_id}` | Landlord | Full lodge analytics (financials, room grid, entity counts) |
-| `GET` | `/api/v1/dashboard-tenant` | Tenant | Personal lease and payment summary |
-
-### Health
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/healthy` | Public | Server health check |
+Interactive documentation is available at http://localhost:8000/docs once the server is running.
 
 ---
 
@@ -196,169 +112,149 @@ All routes are prefixed with `/api/v1`. Interactive documentation is available a
 
 ```
 backend/
-├── alembic/                       # Versioned database migration scripts
+├── alembic/                    # Versioned database migration scripts
+│   └── versions/
 ├── app/
-│   ├── main.py                    # Application entry point, middleware, and router registration
+│   ├── main.py                 # App entry point: routers, middleware, CORS
 │   ├── api/
-│   │   ├── deps.py                # Shared FastAPI dependencies (auth, DB session injection)
+│   │   ├── deps.py             # FastAPI dependencies (auth, role guards, DB session)
 │   │   └── v1/
-│   │       ├── user.py            # Auth endpoints (register, login, logout, refresh, me)
-│   │       ├── lodges.py          # Lodge management endpoints
-│   │       ├── rooms.py           # Room management endpoints
-│   │       ├── tenants.py         # Tenant profile endpoints
-│   │       ├── leases.py          # Lease lifecycle endpoints
-│   │       ├── payments.py        # Payment recording endpoints
-│   │       ├── invites.py         # Invite generation and retrieval endpoints
+│   │       ├── user.py         # /api/v1/auth
+│   │       ├── lodges.py       # /api/v1/lodges
+│   │       ├── rooms.py        # /api/v1/rooms
+│   │       ├── tenants.py      # /api/v1/tenants
+│   │       ├── leases.py       # /api/v1/leases
+│   │       ├── payments.py     # /api/v1/payments
+│   │       ├── invites.py      # /api/v1/invites
 │   │       └── dashboards/
-│   │           ├── landlord_dashboard.py  # Landlord analytics endpoints
-│   │           └── tenant_dashboard.py   # Tenant summary endpoints
+│   │           ├── landlord_dashboard.py
+│   │           └── tenant_dashboard.py
 │   ├── core/
-│   │   ├── config.py              # Pydantic-settings for environment variable loading
-│   │   ├── constants.py           # Application-wide constants
-│   │   ├── enums.py               # Enum definitions (UserRole, RoomStatus, LeaseStatus, etc.)
-│   │   ├── exceptions.py          # Custom domain exception classes
-│   │   ├── handlers.py            # Global FastAPI exception handlers
-│   │   └── security.py            # Password hashing (Bcrypt) and JWT generation (PyJWT)
-│   ├── crud/
-│   │   ├── base_crud.py           # Generic base CRUD class (get, update, delete)
-│   │   ├── user.py                # User and refresh token DB operations
-│   │   ├── invite.py              # Invite DB operations
-│   │   ├── lodge.py               # Lodge DB operations including financial aggregations
-│   │   ├── room.py                # Room DB operations and bulk rent updates
-│   │   ├── tenantprofile.py       # Tenant profile DB operations
-│   │   ├── lease.py               # Lease DB operations and active-lease queries
-│   │   └── payment.py             # Payment DB operations and balance calculations
+│   │   ├── config.py           # Pydantic Settings — reads from .env
+│   │   ├── enums.py            # Domain enums (UserRole, RoomStatus, LeaseStatus…)
+│   │   ├── exceptions.py       # Custom domain exception classes
+│   │   ├── handlers.py         # Global FastAPI exception handlers
+│   │   └── security.py         # Bcrypt hashing and JWT creation
+│   ├── crud/                   # SQLAlchemy repository layer
+│   │   ├── base_crud.py, user.py, lodge.py, room.py
+│   │   └── tenantprofile.py, lease.py, payment.py, invite.py
 │   ├── db/
-│   │   ├── base.py                # SQLAlchemy Declarative Base
-│   │   └── session.py             # Database session factory and FastAPI dependency
-│   ├── models/
-│   │   ├── user.py                # User ORM model
-│   │   ├── refresh_token.py       # RefreshToken ORM model
-│   │   ├── invitation.py          # Invite ORM model (UUID pk, expiry, status)
-│   │   ├── lodge.py               # Lodge ORM model
-│   │   ├── room.py                # Room ORM model
-│   │   ├── tenantprofile.py       # TenantProfile ORM model
-│   │   ├── lease.py               # Lease ORM model — computed_status @property
-│   │   └── payment.py             # Payment ORM model (append-only)
-│   ├── schemas/
-│   │   ├── user.py                # User DTOs — UserCreate, UserResponse, UserUpdate, Token
-│   │   ├── invitation.py          # Invite DTOs — InviteCreate, InviteResponse, InviteDetail
-│   │   ├── lodge.py               # Lodge DTOs — LodgeCreate (with RoomGenerator), LodgeResponse
-│   │   ├── room.py                # Room DTOs — RoomCreate, RoomUpdate, RoomGridSummary, BulkRoomUpdate
-│   │   ├── tenantprofile.py       # Tenant DTOs — TenantProfileCreate, TenantProfileResponse
-│   │   ├── lease.py               # Lease DTOs — LeaseCreate, LeaseUpdate (restricted), LeaseResponse
-│   │   ├── payment.py             # Payment DTOs — PaymentCreate, PaymentResponse
-│   │   ├── dashboard.py           # Full dashboard response schemas (Landlord + Tenant)
-│   │   ├── entity_count.py        # Room and tenant count summary schemas
-│   │   ├── financial.py           # Financial aggregation response schemas
-│   │   ├── error.py               # Standardised error response schema
-│   │   └── generic_extras.py      # Shared internal schema components
-│   └── services/
-│       ├── user_service.py        # Auth logic — registration, login, token rotation, logout
-│       ├── invite_service.py      # Invite validation and expiry logic
-│       ├── lodge_service.py       # Lodge creation and ownership verification logic
-│       ├── room_service.py        # Room availability, status, and existence checks
-│       ├── tenant_services.py     # Tenant onboarding, approval, and profile update logic
-│       ├── lease_services.py      # Lease creation, termination, and tenant appeal logic
-│       ├── payment_service.py     # Payment recording and outstanding balance logic
-│       └── dashboard_service.py   # Dashboard data aggregation and orchestration
+│   │   ├── base.py             # SQLAlchemy Base model registry
+│   │   └── session.py          # Engine, SessionLocal, and pragma setup
+│   ├── models/                 # ORM entity definitions
+│   │   └── user.py, refresh_token.py, invitation.py, lodge.py,
+│   │       room.py, tenantprofile.py, lease.py, payment.py
+│   ├── schemas/                # Pydantic v2 DTOs (Create / Update / Response)
+│   │   └── user.py, invitation.py, lodge.py, room.py, tenantprofile.py,
+│   │       lease.py, payment.py, dashboard.py, financial.py, error.py,
+│   │       entity_count.py, generic_extras.py, refresh_token.py
+│   └── services/               # Business logic layer
+│       └── user_service.py, invite_service.py, lodge_service.py,
+│           room_service.py, tenant_services.py, lease_services.py,
+│           payment_service.py, dashboard_service.py
 ├── test/
-│   ├── conftest.py                # Pytest fixtures and isolated in-memory test DB setup
-│   ├── test_auth.py               # Authentication flow tests (14 tests)
-│   ├── test_lodge.py              # Lodge management tests
-│   ├── test_room.py               # Room management tests
-│   ├── test_tenant.py             # Tenant profile and approval tests
-│   ├── test_lease.py              # Lease lifecycle tests
-│   ├── test_payment.py            # Payment recording tests
-│   └── test_main.py               # Application startup tests
-├── utilities/
-│   └── dashboard_utilities.py     # Dashboard filtering helpers
-├── System_Flow.md                 # Source of truth for all API user flows
-├── .env.example                   # Environment variable template
-├── alembic.ini                    # Alembic migration configuration
-├── pytest.ini                     # Pytest configuration with coverage settings
-├── requirements.txt               # Python package dependencies
-└── test_main.http                 # Manual HTTP request collection for API testing
+│   ├── conftest.py             # Fixtures, in-memory SQLite test DB, auth helpers
+│   ├── test_auth.py
+│   ├── test_lodge.py
+│   ├── test_room.py
+│   ├── test_tenant.py
+│   ├── test_lease.py
+│   ├── test_payment.py
+│   ├── test_invite.py
+│   ├── test_landlord_dashboard.py
+│   ├── test_tenant_dashboard.py
+│   ├── test_main.py
+│   └── test_example.py
+├── alembic.ini
+├── pytest.ini
+├── requirements.txt
+└── System_Flow.md              # API user flow reference
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Local Setup
 
-### Prerequisites
-- Python 3.11 or higher
+> ⚠️ All commands assume your terminal starts at the **project root** (`LodgeOpsProject/`).
 
-### 1. Clone and Setup
+### 1. Navigate and create the virtual environment
 
 ```powershell
-# Clone the repository
-git clone https://github.com/DonaldXoftDev/LodgeManagerAPIProject.git
-cd LodgeManagerAPIProject/backend
-
-# Create and activate virtual environment
+cd backend
 python -m venv .venv
-.\.venv\Scripts\activate
-
-# Install dependencies
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+Your terminal prompt should show `(.venv)` when active.
 
-```powershell
-# Copy the environment template
-Copy-Item .env.example .env
+### 2. Configure environment variables
+
+Create `backend/.env` manually (there is no `.env.example` yet — one will be added in a future commit):
+
+```ini
+# Core
+PROJECT_NAME="LodgeOps"
+DATABASE_URL="sqlite:///./lodge_manager.db"
+
+# JWT — generate keys with: python -c "import secrets; print(secrets.token_hex(32))"
+SECRET_KEY="your-access-token-secret-here"
+REFRESH_SECRET_KEY="your-refresh-token-secret-here"
+ALGORITHM="HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# CORS — DEBUG=true merges CORS_ORIGINS and DEV_CORS_ORIGINS
+DEBUG=true
+CORS_ORIGINS="http://localhost:5173"
+DEV_CORS_ORIGINS="http://127.0.0.1:5173,http://localhost:3000"
 ```
 
-Open `.env` and fill in your values (see [Environment Variables](#-environment-variables)).
+> ⚠️ Never commit `.env`. It is in `.gitignore`.
 
-### 3. Run Database Migrations
+### 3. Run database migrations
 
 ```powershell
+# Must be inside backend/ with (.venv) active
 alembic upgrade head
 ```
 
-### 4. Start the Server
+Creates `backend/lodge_manager.db`.
+
+### 4. Start the server
 
 ```powershell
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Accessing the API
-Once running:
-- **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **Health Check:** [http://localhost:8000/healthy](http://localhost:8000/healthy)
-
----
-
-## ⚙ Environment Variables
-
-Copy `.env.example` to `.env` and configure:
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DATABASE_URL` | ✅ | `sqlite:///./lodge_manager.db` | Database connection string |
-| `SECRET_KEY` | ✅ | — | Secret key for signing access tokens. Generate with: `openssl rand -hex 32` |
-| `REFRESH_SECRET_KEY` | ✅ | — | Separate secret key for signing refresh tokens |
-| `ALGORITHM` | ❌ | `HS256` | JWT signing algorithm |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | ❌ | `30` | Access token expiry in minutes |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | ❌ | `7` | Refresh token expiry in days |
-
-> ⚠️ **Never commit your `.env` file.** It is listed in `.gitignore` by default.
+| URL | Purpose |
+|---|---|
+| `http://localhost:8000/docs` | Swagger UI — interactive API explorer |
+| `http://localhost:8000/redoc` | ReDoc API documentation |
+| `http://localhost:8000/healthy` | Health check |
+| `http://localhost:8000/mock/dashboard.html` | Prototype wireframes |
 
 ---
 
 ## 🧪 Running Tests
 
-The test suite uses an isolated in-memory SQLite database so no production data is ever touched.
+The test suite uses an isolated in-memory SQLite database. [`pytest.ini`](pytest.ini) pre-configures `testpaths`, verbosity, coverage source, and warnings — so from inside `backend/` with the venv active, you only need:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest test/ -v --cov=app
+.\.venv\Scripts\python.exe -m pytest
 ```
+
+That's it. The `.ini` file handles the rest:
+- `testpaths = test` → discovers `backend/test/` automatically
+- `addopts` → injects `-v -s --cov=app --cov-report=term-missing` on every run
+
+> ✅ Expected: **157 passed**, ~41 seconds, **95%+ coverage**.
 
 ---
 
 ## 🤝 Contributing
 
-Feedback, suggestions, and contributions are very welcome. Feel free to open an issue or submit a pull request.
+1. Routers handle HTTP only. No business logic in endpoint functions.
+2. Services handle domain rules only. No `Request`/`Response` objects, no raw SQL.
+3. CRUD handles SQLAlchemy queries only. No `if` branches for business rules.
+4. All tests must pass before committing.

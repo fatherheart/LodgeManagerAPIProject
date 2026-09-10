@@ -82,15 +82,15 @@ npm install
 
 ## Environment Variables
 
-The frontend currently does not require any Vite environment variable to run.
+The frontend currently does not require any Vite environment variable to run. The Axios client in `src/lib/axios.ts` defaults to `http://localhost:8000/api/v1` automatically.
 
-If API integration is added later, create a local `.env` file in the `frontend` directory and use Vite's `VITE_` prefix for browser-exposed values:
+To override the backend URL (e.g. pointing at a staging server), create `frontend/.env` and set:
 
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_BASE_API_URL=http://127.0.0.1:8000/api/v1
 ```
 
-Only variables prefixed with `VITE_` are exposed to frontend code by Vite.
+> ⚠️ The variable name is `VITE_BASE_API_URL` — not `VITE_API_BASE_URL`. Only variables prefixed with `VITE_` are exposed to frontend code by Vite.
 
 Do not commit `.env` files or secrets. The root `.gitignore` already ignores `.env`, and `frontend/.gitignore` ignores `*.local` files.
 
@@ -174,31 +174,20 @@ Then open the URL printed by Vite.
 
 ## Running With the Backend
 
-The frontend can be run independently for current screens. If a screen begins calling the FastAPI backend, run the backend separately from the repository root.
+The frontend can be run independently for screens that use mock data. Once a screen calls the FastAPI backend, start the backend separately.
 
-Typical backend startup:
+See [`backend/README.md`](../backend/README.md) for the full backend setup. Quick reference for Windows PowerShell:
 
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
+```powershell
+# From the project root (LodgeOpsProject/)
+cd backend
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --port 8000
 ```
 
-On Windows, activate the virtual environment with:
+The backend runs at `http://127.0.0.1:8000`.
 
-```bash
-venv\Scripts\activate
-```
-
-The backend normally runs at:
-
-```text
-http://127.0.0.1:8000
-```
-
-If frontend API support is added, point the frontend to that backend URL with a `VITE_API_BASE_URL` value in `frontend/.env`.
+Once both servers are running, the frontend at `http://localhost:5173` will communicate with the backend automatically via the Axios client configured in `src/lib/axios.ts`.
 
 ## Source Structure
 
@@ -208,30 +197,33 @@ frontend/
 |-- src/
 |   |-- components/         Reusable UI, auth, dashboard, and layout components
 |   |-- hooks/              Shared React hooks
-|   |-- lib/                Utilities and validation schemas
-|   |-- pages/              Route-level pages
-|   |-- App.tsx             Route configuration
+|   |-- lib/                Axios instance, utilities, and form validation schemas
+|   |-- routes/             File-based routing powered by TanStack Router
+|   |-- services/           API request functions & query hooks
+|   |-- types/              TypeScript interfaces and shared types
+|   |-- routeTree.gen.ts    Auto-generated route tree configuration for TanStack Router (Do not edit!!!)
 |   |-- index.css           Global styles and Tailwind imports
-|   `-- main.tsx            React application entry point
+|   `-- main.tsx            React application entry point (RouterProvider setup)
 |-- index.html              Vite HTML entry
 |-- package.json            npm scripts and dependency list
 |-- package-lock.json       Locked dependency versions
 |-- tsconfig*.json          TypeScript configuration
-`-- vite.config.ts          Vite, React Compiler, Babel, and Tailwind setup
+`-- vite.config.ts          Vite, React Compiler, Babel, TanStack Router, and Tailwind setup
 ```
 
 ## Main Dependencies
 
-- React, for the UI.
-- React DOM, for rendering React in the browser.
-- React Router DOM, for client-side routing.
-- TypeScript, for static typing.
-- Vite, for local development and production builds.
-- Tailwind CSS, for styling.
-- Lucide React, for icons.
-- React Hook Form, for form state.
-- Zod, for validation schemas.
-- React Hot Toast, for toast notifications.
+- **React 19 & React DOM**: Core UI library.
+- **TanStack Router (@tanstack/react-router)**: Type-safe client-side routing.
+- **TanStack React Query v5**: Server state management & data fetching.
+- **Axios**: HTTP client with credentials support.
+- **Tailwind CSS v4 & @tailwindcss/vite**: Utility-first styling.
+- **React Hook Form & Zod**: Schema-driven form validation.
+- **Lucide React**: UI iconography.
+- **Radix UI & CVA / clsx**: Headless primitives and class composition.
+- **React Hot Toast**: Notification toasts.
+- **TypeScript**: Static typing.
+- **Vite**: Local development server & production bundler.
 
 ## Clean Reinstall
 

@@ -53,6 +53,38 @@ def register_landlord(
 
 
 @router.post(
+    '/register/operator',
+    response_model=schema_user.UserResponse,
+    status_code=201,
+    summary="Register a new operator",
+    description="Creates a new operator account for pilot testing. The email must be unique across the system.",
+    response_description="The newly created operator user",
+    responses={
+        400: {
+            "model": ErrorResponseSchema,
+            "description": "A user with this email already exists in the system",
+        },
+    },
+)
+def register_operator(
+        operator_in: schema_user.UserCreate,
+        db: Session = Depends(get_db)
+):
+    """
+    Register a new operator user.
+
+    Args:
+        operator_in (schema_user.UserCreate): The registration data for the operator.
+        db (Session): The database session.
+
+    Returns:
+        schema_user.UserResponse: The newly created operator user.
+    """
+    return user_service.sign_up_operator(db=db, operator_data=operator_in)
+
+
+
+@router.post(
     '/register/tenant',
     response_model=schema_tenant.TenantProfileResponse,
     status_code=201,

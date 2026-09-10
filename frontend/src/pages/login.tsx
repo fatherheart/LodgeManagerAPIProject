@@ -40,12 +40,12 @@ export default function LoginPage() {
             <LoginForm />
           </div>
           <div className="mt-8 text-center sm:text-left text-sm font-sans pt-8 border-t border-charcoal-100">
-            <span className="text-charcoal-500">Already have an account?</span>
+            <span className="text-charcoal-500">Don't have an account?</span>
             <Link
               to="/register"
               className="ml-1 text-terracotta-500 font-medium hover:text-terracotta-600 transition-colors"
             >
-              Log In
+              Sign Up
             </Link>
           </div>
         </div>

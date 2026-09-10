@@ -73,7 +73,7 @@ export function LoginForm() {
           isLoading={isPending}
           disabled={isPending}
         >
-          Sign In
+          Log In
         </Button>
       </div>
     </Form>

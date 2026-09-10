@@ -75,7 +75,7 @@ export default function RegisterPage() {
               to="/login"
               className="text-terracotta-500 font-medium hover:text-terracotta-600 transition-colors"
             >
-              Sign In
+              Log In
             </Link>
           </div>
         </div>
